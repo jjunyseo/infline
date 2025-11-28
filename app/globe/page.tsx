@@ -2,12 +2,13 @@
 
 import { useRef, useCallback, useState } from 'react';
 import dynamic from 'next/dynamic';
-import ControlPanel from '@/components/ControlPanel';
-import LineList from '@/components/LineList';
+import Sidebar from '@/components/Sidebar';
+import SearchBox from '@/components/SearchBox';
 import AuthModal from '@/components/AuthModal';
 import mapboxgl from 'mapbox-gl';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { useLines } from '@/store/useLines';
 
 // SSR 비활성화 (Mapbox는 클라이언트에서만 동작)
 const Globe = dynamic(() => import('@/components/Globe'), {
@@ -25,6 +26,7 @@ const Globe = dynamic(() => import('@/components/Globe'), {
 export default function GlobePage() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const { user, loading, signOut } = useAuth();
+  const { userLocation } = useLines();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
@@ -35,20 +37,20 @@ export default function GlobePage() {
   const handleFlyTo = useCallback((lng: number, lat: number) => {
     mapRef.current?.flyTo({
       center: [lng, lat],
-      zoom: 6,
+      zoom: 8,
       duration: 2000,
     });
   }, []);
 
   const handleFlyToMyLocation = useCallback(() => {
-    navigator.geolocation.getCurrentPosition((position) => {
+    if (userLocation) {
       mapRef.current?.flyTo({
-        center: [position.coords.longitude, position.coords.latitude],
+        center: [userLocation.lon, userLocation.lat],
         zoom: 4,
         duration: 2000,
       });
-    });
-  }, []);
+    }
+  }, [userLocation]);
 
   const handleSignOut = async () => {
     try {
@@ -61,8 +63,38 @@ export default function GlobePage() {
 
   return (
     <div className="w-screen h-screen bg-[#0a0a0f] overflow-hidden relative">
+      {/* 사이드바 */}
+      <Sidebar />
+
+      {/* 상단 검색바 */}
+      <div className="absolute top-6 left-1/2 -translate-x-1/2 z-20 w-full max-w-md px-4">
+        <SearchBox
+          onSelect={(lng, lat, name) => {
+            handleFlyTo(lng, lat);
+            console.log('Selected:', name);
+          }}
+          placeholder="도시, 장소 검색..."
+          className="w-full"
+        />
+      </div>
+
       {/* 상단 우측 버튼들 */}
       <div className="absolute top-6 right-6 z-20 flex items-center gap-3">
+        {/* 내 위치 버튼 */}
+        <button
+          onClick={handleFlyToMyLocation}
+          disabled={!userLocation}
+          className="p-2.5 bg-[#1a1a24]/80 backdrop-blur-sm border border-[#3a3a4a] rounded-lg 
+                     text-gray-400 hover:text-white hover:bg-[#2a2a3a] transition-colors
+                     disabled:opacity-50 disabled:cursor-not-allowed"
+          title="내 위치로 이동"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
+
         {/* 사용자 정보 또는 로그인 버튼 */}
         {loading ? (
           <div className="w-8 h-8 border-2 border-[#4264fb] border-t-transparent rounded-full animate-spin" />
@@ -145,15 +177,6 @@ export default function GlobePage() {
 
       {/* 지구 */}
       <Globe onMapReady={handleMapReady} />
-
-      {/* 컨트롤 패널 */}
-      <ControlPanel
-        onFlyTo={handleFlyTo}
-        onFlyToMyLocation={handleFlyToMyLocation}
-      />
-
-      {/* 선 목록 */}
-      <LineList />
 
       {/* 안내 텍스트 */}
       <div className="absolute bottom-6 right-6 z-10 text-right">
