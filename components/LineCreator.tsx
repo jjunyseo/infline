@@ -4,6 +4,8 @@ import { useLines } from '@/store/useLines';
 import { Line } from '@/types';
 import { getRandomLineColor } from '@/lib/lineGenerator';
 
+const EARTH_HALF_CIRCUMFERENCE = 20037.5;
+
 export default function LineCreator() {
   const {
     creationStep,
@@ -11,10 +13,12 @@ export default function LineCreator() {
     userLocation,
     previewGeometry,
     previewCenter,
+    shrinkDirection,
     setCreationStep,
     setCreationMode,
     setMaxRiders,
     setRadius,
+    setShrinkDirection,
     goBack,
     resetCreation,
     removeSelectedPoint,
@@ -31,6 +35,32 @@ export default function LineCreator() {
   const handleStartPointsMode = () => {
     setCreationMode('points');
     setCreationStep('select-points');
+  };
+
+  const sliderToRadius = (value: number): number => {
+    const distanceFromCenter = Math.abs(value - 50);
+    return EARTH_HALF_CIRCUMFERENCE - (distanceFromCenter / 50) * (EARTH_HALF_CIRCUMFERENCE - 50);
+  };
+
+  const radiusToSlider = (radius: number): number => {
+    const distanceFromCenter = ((EARTH_HALF_CIRCUMFERENCE - radius) / (EARTH_HALF_CIRCUMFERENCE - 50)) * 50;
+    if (shrinkDirection === 'left') {
+      return 50 - distanceFromCenter;
+    } else if (shrinkDirection === 'right') {
+      return 50 + distanceFromCenter;
+    }
+    return 50;
+  };
+
+  const handleSliderChange = (value: number) => {
+    if (value < 50) {
+      setShrinkDirection('left');
+    } else if (value > 50) {
+      setShrinkDirection('right');
+    } else {
+      setShrinkDirection(null);
+    }
+    setRadius(sliderToRadius(value));
   };
 
   const handleSaveLine = () => {
@@ -55,73 +85,53 @@ export default function LineCreator() {
     resetCreation();
   };
 
-  // 모드 선택 화면
   if (creationStep === 'select-mode') {
     return (
       <div className="p-4 space-y-4">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-400 mb-3">생성 방식 선택</h3>
-          <div className="space-y-2">
-            <button
-              onClick={handleStartDirectionMode}
-              disabled={!userLocation}
-              className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl 
-                         hover:border-[#4264fb]/50 transition-all text-left group
-                         disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 bg-[#4264fb]/20 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-[#4264fb]/30 transition-colors">
-                  <span className="text-xl">🧭</span>
-                </div>
-                <div>
-                  <h4 className="text-white font-medium mb-1">방향 선택</h4>
-                  <p className="text-xs text-gray-500">
-                    내 위치에서 방향을 선택하여 선을 만듭니다.
-                  </p>
-                </div>
+        <h3 className="text-sm font-semibold text-gray-400 mb-3">생성 방식 선택</h3>
+        <div className="space-y-2">
+          <button
+            onClick={handleStartDirectionMode}
+            disabled={!userLocation}
+            className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl hover:border-[#4264fb]/50 transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-[#4264fb]/20 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-[#4264fb]/30 transition-colors">
+                <span className="text-xl">🧭</span>
               </div>
-            </button>
+              <div>
+                <h4 className="text-white font-medium mb-1">방향 선택</h4>
+                <p className="text-xs text-gray-500">내 위치에서 방향을 선택하여 선을 만듭니다.</p>
+              </div>
+            </div>
+          </button>
 
-            <button
-              onClick={handleStartPointsMode}
-              disabled={!userLocation}
-              className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl 
-                         hover:border-[#00d4aa]/50 transition-all text-left group
-                         disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 bg-[#00d4aa]/20 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-[#00d4aa]/30 transition-colors">
-                  <span className="text-xl">📍</span>
-                </div>
-                <div>
-                  <h4 className="text-white font-medium mb-1">위치 선택</h4>
-                  <p className="text-xs text-gray-500">
-                    2개의 위치를 선택하면, 3점을 지나는 원이 생성됩니다.
-                  </p>
-                </div>
+          <button
+            onClick={handleStartPointsMode}
+            disabled={!userLocation}
+            className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl hover:border-[#00d4aa]/50 transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-[#00d4aa]/20 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-[#00d4aa]/30 transition-colors">
+                <span className="text-xl">📍</span>
               </div>
-            </button>
-          </div>
+              <div>
+                <h4 className="text-white font-medium mb-1">위치 선택</h4>
+                <p className="text-xs text-gray-500">2개의 위치를 선택하면, 3점을 지나는 원이 생성됩니다.</p>
+              </div>
+            </div>
+          </button>
         </div>
-
-        {!userLocation && (
-          <p className="text-xs text-yellow-500 text-center">
-            ⚠️ 위치 정보를 가져오는 중...
-          </p>
-        )}
+        {!userLocation && <p className="text-xs text-yellow-500 text-center">⚠️ 위치 정보를 가져오는 중...</p>}
       </div>
     );
   }
 
-  // 방향 선택 단계
   if (creationStep === 'select-direction') {
     return (
       <div className="p-4 space-y-4">
         <div className="flex items-center gap-2">
-          <button
-            onClick={goBack}
-            className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors"
-          >
+          <button onClick={goBack} className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
@@ -131,28 +141,19 @@ export default function LineCreator() {
             <span className="font-medium">방향 선택</span>
           </div>
         </div>
-
         <div className="p-4 bg-[#1a1a24] rounded-xl border border-[#3a3a4a]">
-          <p className="text-sm text-gray-300 mb-2">
-            지구에서 선이 나아갈 방향을 클릭하세요.
-          </p>
-          <p className="text-xs text-gray-500">
-            클릭하면 다음 단계로 이동합니다.
-          </p>
+          <p className="text-sm text-gray-300 mb-2">지구에서 선이 나아갈 방향을 클릭하세요.</p>
+          <p className="text-xs text-gray-500">클릭하면 다음 단계로 이동합니다.</p>
         </div>
       </div>
     );
   }
 
-  // 2점 선택 단계
   if (creationStep === 'select-points') {
     return (
       <div className="p-4 space-y-4">
         <div className="flex items-center gap-2">
-          <button
-            onClick={goBack}
-            className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors"
-          >
+          <button onClick={goBack} className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
@@ -162,19 +163,12 @@ export default function LineCreator() {
             <span className="font-medium">위치 선택</span>
           </div>
         </div>
-
         <div className="p-4 bg-[#1a1a24] rounded-xl border border-[#3a3a4a]">
-          <p className="text-sm text-gray-300 mb-2">
-            지구에서 2개의 위치를 선택하세요.
-          </p>
-          <p className="text-xs text-gray-500">
-            내 위치 + 선택한 2점이 하나의 원 위에 놓입니다.
-          </p>
+          <p className="text-sm text-gray-300 mb-2">지구에서 2개의 위치를 선택하세요.</p>
+          <p className="text-xs text-gray-500">내 위치 + 선택한 2점이 하나의 원 위에 놓입니다.</p>
         </div>
-
         <div className="space-y-2">
           <h4 className="text-xs font-medium text-gray-400">선택된 위치</h4>
-
           <div className="flex items-center gap-2 p-3 bg-[#4264fb]/10 border border-[#4264fb]/30 rounded-lg">
             <div className="w-6 h-6 bg-[#4264fb] rounded-full flex items-center justify-center">
               <span className="text-white text-xs">나</span>
@@ -182,34 +176,21 @@ export default function LineCreator() {
             <span className="text-sm text-white">내 위치</span>
             <span className="text-xs text-gray-500 ml-auto">고정</span>
           </div>
-
           {creationConfig.selectedPoints.map((point, index) => (
-            <div
-              key={index}
-              className="flex items-center gap-2 p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg"
-            >
+            <div key={index} className="flex items-center gap-2 p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg">
               <div className="w-6 h-6 bg-[#00d4aa] rounded-full flex items-center justify-center">
                 <span className="text-white text-xs">{index + 1}</span>
               </div>
-              <span className="text-sm text-white truncate flex-1">
-                {point[1].toFixed(4)}, {point[0].toFixed(4)}
-              </span>
-              <button
-                onClick={() => removeSelectedPoint(index)}
-                className="text-gray-500 hover:text-red-400 transition-colors"
-              >
+              <span className="text-sm text-white truncate flex-1">{point[1].toFixed(4)}, {point[0].toFixed(4)}</span>
+              <button onClick={() => removeSelectedPoint(index)} className="text-gray-500 hover:text-red-400 transition-colors">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
           ))}
-
           {Array.from({ length: 2 - creationConfig.selectedPoints.length }).map((_, index) => (
-            <div
-              key={`empty-${index}`}
-              className="flex items-center gap-2 p-3 bg-[#1a1a24]/50 border border-dashed border-[#3a3a4a] rounded-lg"
-            >
+            <div key={`empty-${index}`} className="flex items-center gap-2 p-3 bg-[#1a1a24]/50 border border-dashed border-[#3a3a4a] rounded-lg">
               <div className="w-6 h-6 bg-[#2a2a3a] rounded-full flex items-center justify-center">
                 <span className="text-gray-500 text-xs">{creationConfig.selectedPoints.length + index + 1}</span>
               </div>
@@ -221,15 +202,13 @@ export default function LineCreator() {
     );
   }
 
-  // 커스터마이징 단계
   if (creationStep === 'customize') {
+    const sliderValue = radiusToSlider(creationConfig.radius);
+    
     return (
       <div className="p-4 space-y-4">
         <div className="flex items-center gap-2">
-          <button
-            onClick={goBack}
-            className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors"
-          >
+          <button onClick={goBack} className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
@@ -248,32 +227,38 @@ export default function LineCreator() {
         </div>
 
         <div className="space-y-3">
-          {/* 반경 (방향 모드만) */}
           {creationConfig.mode === 'direction' && (
             <div className="p-3 bg-[#1a1a24] rounded-lg border border-[#3a3a4a]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-gray-400">반경</span>
                 <span className="text-sm text-white font-medium">
-                  {creationConfig.radius >= 20000 
-                    ? '대원 (지구 한 바퀴)' 
-                    : `${Math.round(creationConfig.radius).toLocaleString()} km`}
+                  {creationConfig.radius >= EARTH_HALF_CIRCUMFERENCE - 100 ? '대원' : `${Math.round(creationConfig.radius).toLocaleString()} km`}
                 </span>
               </div>
-              <input
-                type="range"
-                min="50"
-                max="20037"
-                value={creationConfig.radius}
-                onChange={(e) => setRadius(Number(e.target.value))}
-                className="w-full h-2 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer
-                           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 
-                           [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#4264fb] 
-                           [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-              />
+              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                <span>← 왼쪽</span>
+                <span>대원</span>
+                <span>오른쪽 →</span>
+              </div>
+              <div className="relative">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={sliderValue}
+                  onChange={(e) => handleSliderChange(Number(e.target.value))}
+                  className="w-full h-2 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#4264fb] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+                />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-4 bg-[#ffe66d] rounded pointer-events-none" />
+              </div>
+              {shrinkDirection && (
+                <p className="text-xs text-gray-500 mt-2 text-center">
+                  {shrinkDirection === 'left' ? '← 왼쪽으로 축소 중' : '오른쪽으로 축소 중 →'}
+                </p>
+              )}
             </div>
           )}
 
-          {/* 최대 인원 */}
           <div className="p-3 bg-[#1a1a24] rounded-lg border border-[#3a3a4a]">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-gray-400">최대 탑승 인원</span>
@@ -285,45 +270,27 @@ export default function LineCreator() {
               max="100"
               value={creationConfig.maxRiders}
               onChange={(e) => setMaxRiders(Number(e.target.value))}
-              className="w-full h-2 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer
-                         [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 
-                         [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#4264fb] 
-                         [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+              className="w-full h-2 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#4264fb] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
             />
           </div>
         </div>
 
-        {/* 구역 목록 */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-medium text-gray-400">탑승 구역</h4>
-            <button
-              onClick={() => setCreationStep('add-zone')}
-              className="text-xs text-[#ff6b6b] hover:text-[#ff8787] transition-colors"
-            >
-              + 구역 추가
-            </button>
+            <button onClick={() => setCreationStep('add-zone')} className="text-xs text-[#ff6b6b] hover:text-[#ff8787] transition-colors">+ 구역 추가</button>
           </div>
-
           {creationConfig.zones.length === 0 ? (
-            <p className="text-xs text-gray-600 p-3 bg-[#1a1a24] rounded-lg border border-dashed border-[#3a3a4a]">
-              구역이 없으면 선 전체에서 탑승 가능합니다.
-            </p>
+            <p className="text-xs text-gray-600 p-3 bg-[#1a1a24] rounded-lg border border-dashed border-[#3a3a4a]">구역이 없으면 선 전체에서 탑승 가능합니다.</p>
           ) : (
             creationConfig.zones.map((zone, index) => (
-              <div
-                key={zone.id}
-                className="p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg"
-              >
+              <div key={zone.id} className="p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-6 h-6 bg-[#ff6b6b] rounded-full flex items-center justify-center">
                     <span className="text-white text-xs">{index + 1}</span>
                   </div>
                   <span className="text-sm text-white flex-1">구역 {index + 1}</span>
-                  <button
-                    onClick={() => removeZone(zone.id)}
-                    className="text-gray-500 hover:text-red-400 transition-colors"
-                  >
+                  <button onClick={() => removeZone(zone.id)} className="text-gray-500 hover:text-red-400 transition-colors">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
@@ -337,10 +304,7 @@ export default function LineCreator() {
                     max="500"
                     value={zone.radius}
                     onChange={(e) => updateZone(zone.id, { radius: Number(e.target.value) })}
-                    className="flex-1 h-1.5 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer
-                               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 
-                               [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#ff6b6b] 
-                               [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+                    className="flex-1 h-1.5 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#ff6b6b] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                   />
                   <span className="text-xs text-white w-16 text-right">{Math.round(zone.radius)} km</span>
                 </div>
@@ -349,37 +313,19 @@ export default function LineCreator() {
           )}
         </div>
 
-        {/* 저장 버튼 */}
         <div className="pt-4 space-y-2">
-          <button
-            onClick={handleSaveLine}
-            disabled={!previewGeometry}
-            className="w-full py-3 bg-[#4264fb] hover:bg-[#5a7bfc] text-white font-semibold 
-                       rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            ✓ 선 저장하기
-          </button>
-          <button
-            onClick={resetCreation}
-            className="w-full py-3 bg-[#2a2a3a] hover:bg-[#3a3a4a] text-gray-300 
-                       font-medium rounded-lg transition-colors"
-          >
-            취소
-          </button>
+          <button onClick={handleSaveLine} disabled={!previewGeometry} className="w-full py-3 bg-[#4264fb] hover:bg-[#5a7bfc] text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">✓ 선 저장하기</button>
+          <button onClick={resetCreation} className="w-full py-3 bg-[#2a2a3a] hover:bg-[#3a3a4a] text-gray-300 font-medium rounded-lg transition-colors">취소</button>
         </div>
       </div>
     );
   }
 
-  // 구역 추가 단계
   if (creationStep === 'add-zone') {
     return (
       <div className="p-4 space-y-4">
         <div className="flex items-center gap-2">
-          <button
-            onClick={goBack}
-            className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors"
-          >
+          <button onClick={goBack} className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
@@ -389,24 +335,11 @@ export default function LineCreator() {
             <span className="font-medium">구역 추가</span>
           </div>
         </div>
-
         <div className="p-4 bg-[#1a1a24] rounded-xl border border-[#3a3a4a]">
-          <p className="text-sm text-gray-300 mb-2">
-            선 위의 위치를 클릭하세요.
-          </p>
-          <p className="text-xs text-gray-500">
-            선에 가까이 가면 커서가 바뀝니다.
-            <br />클릭 후 드래그로 반경을 조절할 수 있습니다.
-          </p>
+          <p className="text-sm text-gray-300 mb-2">선 위의 위치를 클릭하세요.</p>
+          <p className="text-xs text-gray-500">선에 가까이 가면 커서가 바뀝니다.</p>
         </div>
-
-        <button
-          onClick={goBack}
-          className="w-full py-3 bg-[#2a2a3a] hover:bg-[#3a3a4a] text-gray-300 
-                     font-medium rounded-lg transition-colors"
-        >
-          뒤로
-        </button>
+        <button onClick={goBack} className="w-full py-3 bg-[#2a2a3a] hover:bg-[#3a3a4a] text-gray-300 font-medium rounded-lg transition-colors">뒤로</button>
       </div>
     );
   }

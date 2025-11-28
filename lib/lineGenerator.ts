@@ -1,29 +1,58 @@
 import * as turf from '@turf/turf';
 
+const EARTH_HALF_CIRCUMFERENCE = 20037.5; // km
+
 /**
- * 사용자 위치를 지나는 원 생성
- * - origin: 사용자 위치 (원이 지나가는 점)
- * - bearing: 원이 향하는 방향 (사용자 위치에서 원의 중심 반대 방향)
- * - radius: 원의 반경 (km)
+ * 대원과 접하면서 사용자 위치를 지나는 원 생성
  * 
- * 원은 항상 사용자 위치를 지나며, bearing 방향으로 뻗어나감
+ * - origin: 사용자 위치 (원이 지나는 점)
+ * - bearing: 대원의 방향
+ * - radius: 원의 반경 (대원일 때 EARTH_HALF_CIRCUMFERENCE)
+ * - shrinkDirection: 축소 방향 ('left' = bearing-90, 'right' = bearing+90)
+ * 
+ * 원리:
+ * - 대원: 사용자 위치를 지나며 bearing 방향으로 진행
+ * - 축소된 원: 대원의 접선 방향으로 사용자 위치에서 벗어나지 않으며 축소
+ * - 원의 중심은 사용자 위치에서 접선에 수직인 방향(축소 방향)으로 이동
  */
-export function generateCircleLine(
+export function generateCircleWithDirection(
   origin: [number, number],
   bearing: number,
   radius: number,
+  shrinkDirection: 'left' | 'right' | null,
   steps: number = 200
 ): {
   geometry: GeoJSON.LineString;
   center: [number, number];
 } {
-  // 원의 중심: origin에서 bearing의 반대 방향으로 radius만큼 떨어진 점
-  // 이렇게 하면 원이 origin을 지나면서 bearing 방향으로 뻗어나감
-  const oppositeBearing = (bearing + 180) % 360;
-  const centerPoint = turf.destination(origin, radius, oppositeBearing, { units: 'kilometers' });
+  // 대원인 경우 (radius가 최대에 가까움)
+  if (radius >= EARTH_HALF_CIRCUMFERENCE - 100) {
+    return {
+      geometry: generateGreatCircleLine(origin, bearing, steps),
+      center: origin,
+    };
+  }
+
+  // 축소 방향이 없으면 기본 대원 반환
+  if (!shrinkDirection) {
+    return {
+      geometry: generateGreatCircleLine(origin, bearing, steps),
+      center: origin,
+    };
+  }
+
+  // 원의 중심 방향 계산
+  // 접선 방향 = bearing (대원을 따라가는 방향)
+  // 수직 방향 = bearing ± 90도 (축소 방향)
+  const centerBearing = shrinkDirection === 'right' 
+    ? (bearing + 90) % 360 
+    : (bearing - 90 + 360) % 360;
+  
+  // 원의 중심: 사용자 위치에서 centerBearing 방향으로 radius만큼 이동
+  const centerPoint = turf.destination(origin, radius, centerBearing, { units: 'kilometers' });
   const center = centerPoint.geometry.coordinates as [number, number];
   
-  // 원 생성
+  // 원 생성 (중심에서 radius 거리에 있는 점들)
   const coordinates: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const angle = (360 / steps) * i;
@@ -176,29 +205,21 @@ export function findNearestPointOnLine(
 }
 
 /**
- * 드래그 위치로부터 새 반경 계산
- * - 오른쪽/왼쪽 드래그에 따라 원이 해당 방향으로 축소됨
+ * 드래그 방향으로부터 축소 방향 결정
+ * bearing 기준으로 왼쪽/오른쪽 판단
  */
-export function calculateRadiusFromDrag(
+export function determineShrinkDirection(
   origin: [number, number],
-  bearing: number,
   dragPoint: [number, number],
-  startRadius: number
-): number {
-  // 드래그 포인트에서 origin까지의 거리
-  const distanceToOrigin = turf.distance(origin, dragPoint, { units: 'kilometers' });
-  
-  // bearing 방향에 수직인 방향으로 얼마나 이동했는지 계산
+  bearing: number
+): 'left' | 'right' {
   const dragBearing = turf.bearing(origin, dragPoint);
-  const bearingDiff = dragBearing - bearing;
   
-  // bearing 방향과의 각도 차이에 따라 반경 조절
-  // 90도 차이면 원래 반경 유지, 0도/180도 차이면 최대 변화
-  const factor = Math.cos(bearingDiff * Math.PI / 180);
+  // bearing과 dragBearing의 차이 계산 (-180 ~ 180)
+  let diff = dragBearing - bearing;
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
   
-  // 새 반경 계산: 드래그 거리에 따라 반경 변화
-  const radiusChange = distanceToOrigin * factor * 0.5;
-  const newRadius = Math.max(50, Math.min(startRadius - radiusChange, 20037));
-  
-  return newRadius;
+  // 양수면 오른쪽, 음수면 왼쪽
+  return diff >= 0 ? 'right' : 'left';
 }

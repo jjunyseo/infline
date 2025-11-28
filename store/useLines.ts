@@ -15,43 +15,33 @@ interface LinesState {
   creationStep: LineCreationStep;
   creationConfig: LineCreationConfig;
   
-  // 프리뷰 (별도 관리 - 무한 루프 방지)
+  // 프리뷰 (별도 관리)
   previewGeometry: GeoJSON.LineString | null;
   previewCenter: [number, number] | null;
   
-  // Actions - 선 관리
+  // 축소 방향 (드래그로 결정, 'left' = bearing-90, 'right' = bearing+90)
+  shrinkDirection: 'left' | 'right' | null;
+  
+  // Actions
   addLine: (line: Line) => void;
   removeLine: (id: string) => void;
-  
-  // Actions - 사용자 위치
   setUserLocation: (location: UserLocation) => void;
-  
-  // Actions - 검색 핀
   setSearchPin: (pin: SearchPin | null) => void;
-  
-  // Actions - 선 생성 단계
   setCreationStep: (step: LineCreationStep) => void;
   goBack: () => void;
-  
-  // Actions - 선 생성 설정
   setCreationMode: (mode: 'direction' | 'points') => void;
   setBearing: (bearing: number) => void;
   setRadius: (radius: number) => void;
+  setShrinkDirection: (direction: 'left' | 'right' | null) => void;
   addSelectedPoint: (point: [number, number]) => void;
   removeSelectedPoint: (index: number) => void;
   clearSelectedPoints: () => void;
   setMaxRiders: (count: number) => void;
-  
-  // Actions - 프리뷰 (별도)
   setPreviewGeometry: (geometry: GeoJSON.LineString | null, center: [number, number] | null) => void;
-  
-  // Actions - 구역 설정
   addZone: (zone: LineZone) => void;
   removeZone: (id: string) => void;
   updateZone: (id: string, updates: Partial<LineZone>) => void;
   clearZones: () => void;
-  
-  // Actions - 리셋
   resetCreation: () => void;
   startCreation: () => void;
 }
@@ -63,7 +53,7 @@ const initialCreationConfig: LineCreationConfig = {
   bearing: 0,
   selectedPoints: [],
   maxRiders: 10,
-  radius: EARTH_HALF_CIRCUMFERENCE,
+  radius: EARTH_HALF_CIRCUMFERENCE, // 대원 = 최대값 = 슬라이더 중간
   zones: [],
 };
 
@@ -75,23 +65,20 @@ export const useLines = create<LinesState>((set, get) => ({
   creationConfig: initialCreationConfig,
   previewGeometry: null,
   previewCenter: null,
+  shrinkDirection: null,
 
-  // 선 관리
   addLine: (line) =>
     set((state) => ({ lines: [...state.lines, line] })),
 
   removeLine: (id) =>
     set((state) => ({ lines: state.lines.filter((l) => l.id !== id) })),
 
-  // 사용자 위치
   setUserLocation: (location) =>
     set({ userLocation: location }),
 
-  // 검색 핀
   setSearchPin: (pin) =>
     set({ searchPin: pin }),
 
-  // 선 생성 단계
   setCreationStep: (step) =>
     set({ creationStep: step }),
 
@@ -105,12 +92,15 @@ export const useLines = create<LinesState>((set, get) => ({
           creationConfig: { ...initialCreationConfig },
           previewGeometry: null,
           previewCenter: null,
+          shrinkDirection: null,
         });
         break;
       case 'customize':
         const mode = get().creationConfig.mode;
         set({ 
-          creationStep: mode === 'direction' ? 'select-direction' : 'select-points'
+          creationStep: mode === 'direction' ? 'select-direction' : 'select-points',
+          shrinkDirection: null,
+          creationConfig: { ...get().creationConfig, radius: EARTH_HALF_CIRCUMFERENCE },
         });
         break;
       case 'add-zone':
@@ -121,7 +111,6 @@ export const useLines = create<LinesState>((set, get) => ({
     }
   },
 
-  // 선 생성 설정
   setCreationMode: (mode) =>
     set((state) => ({
       creationConfig: { ...state.creationConfig, mode },
@@ -134,8 +123,14 @@ export const useLines = create<LinesState>((set, get) => ({
 
   setRadius: (radius) =>
     set((state) => ({
-      creationConfig: { ...state.creationConfig, radius: Math.max(100, Math.min(radius, EARTH_HALF_CIRCUMFERENCE)) },
+      creationConfig: { 
+        ...state.creationConfig, 
+        radius: Math.max(50, Math.min(radius, EARTH_HALF_CIRCUMFERENCE)) 
+      },
     })),
+
+  setShrinkDirection: (direction) =>
+    set({ shrinkDirection: direction }),
 
   addSelectedPoint: (point) =>
     set((state) => ({
@@ -163,11 +158,9 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: { ...state.creationConfig, maxRiders: count },
     })),
 
-  // 프리뷰 (별도 상태로 관리)
   setPreviewGeometry: (geometry, center) =>
     set({ previewGeometry: geometry, previewCenter: center }),
 
-  // 구역 설정
   addZone: (zone) =>
     set((state) => ({
       creationConfig: {
@@ -199,13 +192,13 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: { ...state.creationConfig, zones: [] },
     })),
 
-  // 리셋
   resetCreation: () =>
     set({
       creationStep: 'select-mode',
       creationConfig: initialCreationConfig,
       previewGeometry: null,
       previewCenter: null,
+      shrinkDirection: null,
     }),
 
   startCreation: () =>
@@ -214,5 +207,6 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: initialCreationConfig,
       previewGeometry: null,
       previewCenter: null,
+      shrinkDirection: null,
     }),
 }));

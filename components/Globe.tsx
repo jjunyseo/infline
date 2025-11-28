@@ -5,13 +5,14 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useLines } from '@/store/useLines';
 import {
-  generateCircleLine,
+  generateCircleWithDirection,
   generateGreatCircleLine,
   generateCircleFromThreePoints,
   generateZoneCircle,
   calculateBearing,
   calculateDistance,
   findNearestPointOnLine,
+  determineShrinkDirection,
 } from '@/lib/lineGenerator';
 import { LineZone } from '@/types';
 
@@ -42,9 +43,11 @@ export default function Globe({ onMapReady }: GlobeProps) {
     creationStep,
     creationConfig,
     previewGeometry,
+    shrinkDirection,
     setCreationStep,
     setBearing,
     setRadius,
+    setShrinkDirection,
     setPreviewGeometry,
     addSelectedPoint,
     addZone,
@@ -77,7 +80,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
         'star-intensity': 0.6,
       });
 
-      // 저장된 라인
       map.current.addSource('saved-lines', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -94,7 +96,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
         },
       });
 
-      // 프리뷰 라인
       map.current.addSource('preview-line', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -111,7 +112,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
         },
       });
 
-      // 구역
       map.current.addSource('zones', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -141,7 +141,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
       onMapReady?.(map.current);
     });
 
-    // 사용자 위치
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const location = {
@@ -230,7 +229,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
     });
   }, [creationStep, creationConfig.selectedPoints]);
 
-  // 구역 마커 (중심점)
+  // 구역 마커
   useEffect(() => {
     zoneMarkers.current.forEach((m) => m.remove());
     zoneMarkers.current = [];
@@ -285,38 +284,20 @@ export default function Globe({ onMapReady }: GlobeProps) {
     // 방향 모드
     if (creationConfig.mode === 'direction') {
       if (creationStep === 'select-direction' || creationStep === 'customize') {
-        if (creationConfig.radius >= EARTH_HALF_CIRCUMFERENCE - 100) {
-          // 대원
-          geometry = generateGreatCircleLine(
-            [userLocation.lon, userLocation.lat],
-            creationConfig.bearing
-          );
-          center = [userLocation.lon, userLocation.lat];
-        } else {
-          // 커스텀 반경 원
-          const result = generateCircleLine(
-            [userLocation.lon, userLocation.lat],
-            creationConfig.bearing,
-            creationConfig.radius
-          );
-          geometry = result.geometry;
-          center = result.center;
-        }
+        const result = generateCircleWithDirection(
+          [userLocation.lon, userLocation.lat],
+          creationConfig.bearing,
+          creationConfig.radius,
+          shrinkDirection
+        );
+        geometry = result.geometry;
+        center = result.center;
       }
     }
     // 위치 모드
     else if (creationConfig.mode === 'points') {
-      if (creationStep === 'select-points' && creationConfig.selectedPoints.length === 2) {
-        const result = generateCircleFromThreePoints(
-          [userLocation.lon, userLocation.lat],
-          creationConfig.selectedPoints[0],
-          creationConfig.selectedPoints[1]
-        );
-        if (result) {
-          geometry = result.geometry;
-          center = result.center;
-        }
-      } else if (creationStep === 'customize' && creationConfig.selectedPoints.length === 2) {
+      if ((creationStep === 'select-points' || creationStep === 'customize') && 
+          creationConfig.selectedPoints.length === 2) {
         const result = generateCircleFromThreePoints(
           [userLocation.lon, userLocation.lat],
           creationConfig.selectedPoints[0],
@@ -346,6 +327,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
     creationConfig.bearing,
     creationConfig.radius,
     creationConfig.selectedPoints,
+    shrinkDirection,
     setPreviewGeometry,
   ]);
 
@@ -358,7 +340,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
 
     const zoneFeatures: GeoJSON.Feature[] = [];
 
-    // 저장된 라인의 구역
     lines.forEach((line) => {
       line.zones.forEach((zone) => {
         zoneFeatures.push({
@@ -369,7 +350,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
       });
     });
 
-    // 현재 설정 중인 구역
     if (creationStep === 'customize' || creationStep === 'add-zone') {
       creationConfig.zones.forEach((zone) => {
         zoneFeatures.push({
@@ -419,7 +399,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
       const handleClick = (e: mapboxgl.MapMouseEvent) => {
         addSelectedPoint([e.lngLat.lng, e.lngLat.lat]);
         
-        // 2점 다 선택되면 커스터마이징으로
         if (creationConfig.selectedPoints.length >= 1) {
           setTimeout(() => setCreationStep('customize'), 100);
         }
@@ -436,8 +415,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
 
     // 커스터마이징 모드
     if (creationStep === 'customize') {
-      let dragStartPoint: [number, number] | null = null;
-      let startRadius = creationConfig.radius;
+      let dragStartRadius = creationConfig.radius;
 
       const handleMouseMove = (e: mapboxgl.MapMouseEvent) => {
         if (!previewGeometry) return;
@@ -445,7 +423,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
         const coords = previewGeometry.coordinates as [number, number][];
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
         
-        // 선에 가까우면 커서 변경
         if (nearest.distance < 200) {
           setIsNearLine(true);
           canvas.style.cursor = isDraggingRadius ? 'grabbing' : 'grab';
@@ -455,18 +432,24 @@ export default function Globe({ onMapReady }: GlobeProps) {
         }
 
         // 반경 드래그 중
-        if (isDraggingRadius && userLocation && dragStartPoint) {
-          const dragDistance = calculateDistance(dragStartPoint, [e.lngLat.lng, e.lngLat.lat]);
-          const dragBearing = calculateBearing(dragStartPoint, [e.lngLat.lng, e.lngLat.lat]);
-          const lineBearing = creationConfig.bearing;
+        if (isDraggingRadius && userLocation) {
+          const dragDistance = calculateDistance(
+            [userLocation.lon, userLocation.lat],
+            [e.lngLat.lng, e.lngLat.lat]
+          );
           
-          // 드래그 방향이 선의 방향과 같은 쪽인지 반대쪽인지
-          const bearingDiff = ((dragBearing - lineBearing + 540) % 360) - 180;
-          const direction = bearingDiff > -90 && bearingDiff < 90 ? 1 : -1;
+          // 축소 방향이 없으면 결정
+          if (!shrinkDirection) {
+            const direction = determineShrinkDirection(
+              [userLocation.lon, userLocation.lat],
+              [e.lngLat.lng, e.lngLat.lat],
+              creationConfig.bearing
+            );
+            setShrinkDirection(direction);
+          }
           
-          // 반경 변화량
-          const radiusChange = dragDistance * direction * 2;
-          const newRadius = Math.max(50, Math.min(startRadius - radiusChange, EARTH_HALF_CIRCUMFERENCE));
+          // 드래그 거리에 따라 반경 조절 (대원에서 시작, 드래그할수록 작아짐)
+          const newRadius = Math.max(50, EARTH_HALF_CIRCUMFERENCE - dragDistance * 2);
           setRadius(newRadius);
         }
       };
@@ -479,8 +462,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
         
         if (nearest.distance < 200) {
           setIsDraggingRadius(true);
-          dragStartPoint = [e.lngLat.lng, e.lngLat.lat];
-          startRadius = creationConfig.radius;
+          dragStartRadius = creationConfig.radius;
           map.current?.dragPan.disable();
           canvas.style.cursor = 'grabbing';
         }
@@ -489,7 +471,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
       const handleMouseUp = () => {
         if (isDraggingRadius) {
           setIsDraggingRadius(false);
-          dragStartPoint = null;
           map.current?.dragPan.enable();
           canvas.style.cursor = isNearLine ? 'grab' : 'default';
         }
@@ -502,12 +483,11 @@ export default function Globe({ onMapReady }: GlobeProps) {
         const coords = previewGeometry.coordinates as [number, number][];
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
         
-        // 선 위 클릭 → 구역 추가
         if (nearest.distance < 200) {
           const newZone: LineZone = {
             id: `zone-${Date.now()}`,
             center: nearest.point,
-            radius: 100, // 기본 100km
+            radius: 100,
           };
           addZone(newZone);
           setEditingZoneId(newZone.id);
@@ -545,14 +525,12 @@ export default function Globe({ onMapReady }: GlobeProps) {
         
         if (nearest.distance < 200) {
           setIsNearLine(true);
-          // 핀 커서
           canvas.style.cursor = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'32\' viewBox=\'0 0 24 32\'%3E%3Cpath d=\'M12 0C5.37 0 0 5.37 0 12c0 9 12 20 12 20s12-11 12-20c0-6.63-5.37-12-12-12z\' fill=\'%23ff6b6b\'/%3E%3Ccircle cx=\'12\' cy=\'10\' r=\'4\' fill=\'white\'/%3E%3C/svg%3E") 12 32, crosshair';
         } else {
           setIsNearLine(false);
           canvas.style.cursor = 'crosshair';
         }
 
-        // 구역 드래그 중이면 반경 조절
         if (isDraggingZone && editingZoneId) {
           const zone = creationConfig.zones.find(z => z.id === editingZoneId);
           if (zone) {
@@ -565,7 +543,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
       const handleMouseDown = (e: mapboxgl.MapMouseEvent) => {
         if (!previewGeometry) return;
         
-        // 기존 구역 클릭 확인
         for (const zone of creationConfig.zones) {
           const dist = calculateDistance(zone.center, [e.lngLat.lng, e.lngLat.lat]);
           if (dist < zone.radius + 50) {
@@ -628,12 +605,14 @@ export default function Globe({ onMapReady }: GlobeProps) {
     userLocation,
     creationConfig,
     previewGeometry,
+    shrinkDirection,
     isDraggingRadius,
     isDraggingZone,
     isNearLine,
     editingZoneId,
     setBearing,
     setRadius,
+    setShrinkDirection,
     setCreationStep,
     addSelectedPoint,
     addZone,
@@ -644,7 +623,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="w-full h-full" />
 
-      {/* 모드 가이드 */}
       {creationStep === 'select-direction' && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-[#1a1a24]/90 backdrop-blur-sm px-6 py-3 rounded-full border border-[#4264fb]/50 z-10">
           <p className="text-sm text-white">
