@@ -5,15 +5,53 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useLines } from '@/store/useLines';
 import {
-  generateTiltedCircle,
+  generateCircleThroughPoint,
   generateCircleFromThreePoints,
   generateZoneCircle,
   calculateBearing,
   calculateDistance,
   findNearestPointOnLine,
-  tiltToDisplayRadius,
+  offsetToDisplayRadius,
 } from '@/lib/lineGenerator';
 import { LineZone } from '@/types';
+
+const MIN_LINE_COORDINATES = 32;
+const LOOP_CLOSURE_TOLERANCE_KM = 20; // tolerate small numerical errors
+const MAX_ORIGIN_DEVIATION_KM = 5000; // only enforced for preview lines
+
+const isFiniteCoordinate = (coord: [number, number]) =>
+  Array.isArray(coord) &&
+  coord.length >= 2 &&
+  Number.isFinite(coord[0]) &&
+  Number.isFinite(coord[1]);
+
+function validateLineString(
+  geometry: GeoJSON.LineString | null | undefined,
+  origin?: [number, number]
+): geometry is GeoJSON.LineString {
+  if (!geometry) return false;
+
+  const coordinates = geometry.coordinates as [number, number][];
+  if (!Array.isArray(coordinates) || coordinates.length < MIN_LINE_COORDINATES) {
+    return false;
+  }
+
+  if (coordinates.some((coord) => !isFiniteCoordinate(coord))) {
+    return false;
+  }
+
+  const first = coordinates[0];
+  const last = coordinates[coordinates.length - 1];
+  if (calculateDistance(first, last) > LOOP_CLOSURE_TOLERANCE_KM) {
+    return false;
+  }
+
+  if (origin && calculateDistance(origin, first) > MAX_ORIGIN_DEVIATION_KM) {
+    return false;
+  }
+
+  return true;
+}
 
 interface GlobeProps {
   onMapReady?: (map: mapboxgl.Map) => void;
@@ -27,12 +65,12 @@ export default function Globe({ onMapReady }: GlobeProps) {
   const pointMarkers = useRef<mapboxgl.Marker[]>([]);
   const zoneMarkers = useRef<mapboxgl.Marker[]>([]);
   
-  const [isDraggingTilt, setIsDraggingTilt] = useState(false);
+  const [isDraggingOffset, setIsDraggingOffset] = useState(false);
   const [isDraggingZone, setIsDraggingZone] = useState(false);
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   const [isNearLine, setIsNearLine] = useState(false);
   
-  const dragStartRef = useRef<{ point: [number, number]; tilt: number } | null>(null);
+  const dragStartRef = useRef<{ point: [number, number] } | null>(null);
 
   const {
     lines,
@@ -42,10 +80,10 @@ export default function Globe({ onMapReady }: GlobeProps) {
     creationStep,
     creationConfig,
     previewGeometry,
-    tilt,
+    offset,
     setCreationStep,
     setBearing,
-    setTilt,
+    setOffset,
     setPreviewGeometry,
     addSelectedPoint,
     addZone,
@@ -260,11 +298,13 @@ export default function Globe({ onMapReady }: GlobeProps) {
 
     const source = map.current.getSource('saved-lines') as mapboxgl.GeoJSONSource;
     if (source) {
-      const features = lines.map((line) => ({
-        type: 'Feature' as const,
-        properties: { id: line.id, color: line.color },
-        geometry: line.geometry,
-      }));
+      const features = lines
+        .filter((line) => validateLineString(line.geometry))
+        .map((line) => ({
+          type: 'Feature' as const,
+          properties: { id: line.id, color: line.color },
+          geometry: line.geometry,
+        }));
       source.setData({ type: 'FeatureCollection', features });
     }
   }, [lines]);
@@ -282,10 +322,10 @@ export default function Globe({ onMapReady }: GlobeProps) {
     // 방향 모드
     if (creationConfig.mode === 'direction') {
       if (creationStep === 'select-direction' || creationStep === 'customize') {
-        const result = generateTiltedCircle(
+        const result = generateCircleThroughPoint(
           [userLocation.lon, userLocation.lat],
           creationConfig.bearing,
-          tilt
+          offset
         );
         geometry = result.geometry;
         center = result.center;
@@ -307,23 +347,27 @@ export default function Globe({ onMapReady }: GlobeProps) {
       }
     }
 
-    if (geometry) {
+    const currentOrigin: [number, number] = [userLocation.lon, userLocation.lat];
+    const validGeometry =
+      geometry && validateLineString(geometry, currentOrigin) ? geometry : null;
+
+    if (validGeometry) {
       source.setData({
         type: 'FeatureCollection',
-        features: [{ type: 'Feature', properties: {}, geometry }],
+        features: [{ type: 'Feature', properties: {}, geometry: validGeometry }],
       });
     } else {
       source.setData({ type: 'FeatureCollection', features: [] });
     }
 
-    setPreviewGeometry(geometry, center);
+    setPreviewGeometry(validGeometry, validGeometry ? center : null);
   }, [
     userLocation,
     creationStep,
     creationConfig.mode,
     creationConfig.bearing,
     creationConfig.selectedPoints,
-    tilt,
+    offset,
     setPreviewGeometry,
   ]);
 
@@ -419,29 +463,31 @@ export default function Globe({ onMapReady }: GlobeProps) {
         
         if (nearest.distance < 300) {
           setIsNearLine(true);
-          canvas.style.cursor = isDraggingTilt ? 'grabbing' : 'grab';
+          canvas.style.cursor = isDraggingOffset ? 'grabbing' : 'grab';
         } else {
           setIsNearLine(false);
           canvas.style.cursor = 'default';
         }
 
         // 드래그 중
-        if (isDraggingTilt && userLocation && dragStartRef.current) {
+        if (isDraggingOffset && userLocation && dragStartRef.current) {
           const origin: [number, number] = [userLocation.lon, userLocation.lat];
           const currentPoint: [number, number] = [e.lngLat.lng, e.lngLat.lat];
           
-          // 드래그 방향에 따라 tilt 결정
+          // 드래그 방향에 따라 offset 계산
+          // bearing + 90° 방향이면 양수 (N 반구, 오른쪽)
+          // bearing - 90° 방향이면 음수 (S 반구, 왼쪽)
           const dragBearing = calculateBearing(origin, currentPoint);
           const bearingDiff = ((dragBearing - creationConfig.bearing + 540) % 360) - 180;
           
           // 드래그 거리
           const dragDistance = calculateDistance(dragStartRef.current.point, currentPoint);
           
-          // tilt 계산: 방향에 따라 양수/음수, 거리에 따라 크기
-          const direction = bearingDiff > 0 ? 1 : -1;
-          const newTilt = direction * Math.min((dragDistance / 3000) * 90, 90);
+          // offset 계산: 방향에 따라 양수/음수
+          const direction = (bearingDiff > 0 && bearingDiff < 180) ? 1 : -1;
+          const newOffset = direction * Math.min(dragDistance / 5000, 1);
           
-          setTilt(newTilt);
+          setOffset(newOffset);
         }
       };
 
@@ -452,10 +498,9 @@ export default function Globe({ onMapReady }: GlobeProps) {
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
         
         if (nearest.distance < 300) {
-          setIsDraggingTilt(true);
+          setIsDraggingOffset(true);
           dragStartRef.current = {
             point: [e.lngLat.lng, e.lngLat.lat],
-            tilt: tilt,
           };
           map.current?.dragPan.disable();
           canvas.style.cursor = 'grabbing';
@@ -463,8 +508,8 @@ export default function Globe({ onMapReady }: GlobeProps) {
       };
 
       const handleMouseUp = () => {
-        if (isDraggingTilt) {
-          setIsDraggingTilt(false);
+        if (isDraggingOffset) {
+          setIsDraggingOffset(false);
           dragStartRef.current = null;
           map.current?.dragPan.enable();
           canvas.style.cursor = isNearLine ? 'grab' : 'default';
@@ -472,7 +517,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
       };
 
       const handleClick = (e: mapboxgl.MapMouseEvent) => {
-        if (isDraggingTilt) return;
+        if (isDraggingOffset) return;
         if (!previewGeometry || !isNearLine) return;
         
         const coords = previewGeometry.coordinates as [number, number][];
@@ -600,13 +645,13 @@ export default function Globe({ onMapReady }: GlobeProps) {
     userLocation,
     creationConfig,
     previewGeometry,
-    tilt,
-    isDraggingTilt,
+    offset,
+    isDraggingOffset,
     isDraggingZone,
     isNearLine,
     editingZoneId,
     setBearing,
-    setTilt,
+    setOffset,
     setCreationStep,
     addSelectedPoint,
     addZone,
@@ -614,7 +659,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
   ]);
 
   // 표시용 반경
-  const displayRadius = tiltToDisplayRadius(tilt);
+  const displayRadius = offsetToDisplayRadius(offset);
 
   return (
     <div className="relative w-full h-full">
@@ -639,10 +684,10 @@ export default function Globe({ onMapReady }: GlobeProps) {
       {creationStep === 'customize' && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-[#1a1a24]/90 backdrop-blur-sm px-6 py-3 rounded-full border border-[#ffe66d]/50 z-10">
           <p className="text-sm text-white">
-            {isDraggingTilt 
-              ? `📐 ${tilt > 0 ? '오른쪽' : tilt < 0 ? '왼쪽' : '대원'} | ${Math.round(displayRadius).toLocaleString()} km`
+            {isDraggingOffset 
+              ? `📐 ${offset > 0 ? 'N 반구' : offset < 0 ? 'S 반구' : '대원'} | ${Math.round(displayRadius).toLocaleString()} km`
               : isNearLine 
-                ? '✋ 드래그로 평면 회전 · 클릭으로 구역 추가' 
+                ? '✋ 드래그로 원 크기 조절 · 클릭으로 구역 추가' 
                 : '⚙️ 선 위로 마우스를 이동하세요'}
           </p>
         </div>

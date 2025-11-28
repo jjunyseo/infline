@@ -1,178 +1,278 @@
 import * as turf from '@turf/turf';
 
-const EARTH_HALF_CIRCUMFERENCE = 20037.5; // km
+const EARTH_RADIUS_KM = 6371; // Mean Earth radius
+const EARTH_HALF_CIRCUMFERENCE = Math.PI * EARTH_RADIUS_KM; // ≈ 20,037 km
+const MAX_OFFSET_ANGLE = Math.PI / 2 - 1e-4; // Prevent singularity at exactly ±90°
+const EPSILON = 1e-9;
 
-/**
- * 대원의 평면을 회전시켜 원을 생성
- * 
- * - origin: 사용자 위치 (원이 항상 지나는 점)
- * - bearing: 대원의 방향
- * - tilt: 평면 회전 각도 (-90 ~ 0 ~ 90)
- *   - 0: 대원 (지구 한 바퀴)
- *   - +90: 오른쪽으로 90도 회전 → 점
- *   - -90: 왼쪽으로 90도 회전 → 점
- */
-export function generateTiltedCircle(
-  origin: [number, number],
-  bearing: number,
-  tilt: number,
-  steps: number = 200
-): {
+type Vector3 = [number, number, number];
+
+interface CircleGeometryParams {
+  normal: Vector3;
+  pointOnPlane: Vector3;
+  steps: number;
+  startCoordinate?: [number, number];
+}
+
+interface CircleGeometryResult {
   geometry: GeoJSON.LineString;
-  center: [number, number];
-} {
-  const absTilt = Math.abs(tilt);
-  
-  // tilt가 거의 0이면 대원
-  if (absTilt < 1) {
-    return {
-      geometry: generateGreatCircleLine(origin, bearing, steps),
-      center: origin,
-    };
-  }
-  
-  // tilt 방향 (bearing에 수직)
-  const tiltDirection = tilt > 0 
-    ? (bearing + 90) % 360 
-    : (bearing - 90 + 360) % 360;
-  
-  // tilt 강도 (0 ~ 1)
-  // 0: 대원, 1: 점
-  const tiltStrength = absTilt / 90;
-  
-  const coordinates: [number, number][] = [];
-  const earthCircumference = 40075;
-  const stepDistance = earthCircumference / steps;
-  
-  for (let i = 0; i <= steps; i++) {
-    // 대원 위의 점
-    const distance = stepDistance * i;
-    const greatCirclePoint = turf.destination(origin, distance, bearing, { units: 'kilometers' });
-    const gcCoord = greatCirclePoint.geometry.coordinates as [number, number];
-    
-    // 대원에서의 진행도 (0 → 1 → 0, 중간에서 최대)
-    const t = i / steps;
-    const progress = Math.sin(t * Math.PI);
-    
-    // === 평면 회전 효과 ===
-    // 1. 대원의 점을 tiltDirection 방향으로 밀기
-    // 2. 동시에 origin 쪽으로 수축 (점으로 수렴)
-    
-    // 밀리는 양 (중간 지점에서 최대)
-    const maxPush = 8000 * tiltStrength; // 최대 밀림
-    const pushDistance = progress * maxPush;
-    
-    // tiltDirection 방향으로 밀기
-    let coord: [number, number];
-    
-    if (pushDistance > 10) {
-      const pushedPoint = turf.destination(gcCoord, pushDistance, tiltDirection, { units: 'kilometers' });
-      coord = pushedPoint.geometry.coordinates as [number, number];
-    } else {
-      coord = gcCoord;
-    }
-    
-    // 점으로 수렴하기 위해 origin 쪽으로 당기기
-    // tiltStrength가 커질수록 더 많이 당김
-    // 수렴점: origin에서 tiltDirection 방향으로 약간 떨어진 점
-    const convergenceDistance = 100 * (1 - tiltStrength); // tilt=90일 때 0
-    const convergencePoint = turf.destination(origin, convergenceDistance, tiltDirection, { units: 'kilometers' });
-    const convergence = convergencePoint.geometry.coordinates as [number, number];
-    
-    // 현재 위치에서 수렴점 쪽으로 보간
-    // tiltStrength^2를 사용해서 끝에서 급격히 수렴
-    const pullFactor = Math.pow(tiltStrength, 1.5) * progress;
-    
-    const finalLng = coord[0] + (convergence[0] - coord[0]) * pullFactor;
-    const finalLat = coord[1] + (convergence[1] - coord[1]) * pullFactor;
-    
-    coordinates.push([finalLng, finalLat]);
-  }
-  
-  // 중심 계산 (중간 지점)
-  const midIndex = Math.floor(steps / 2);
-  const center = coordinates[midIndex];
-  
-  return {
-    geometry: { type: 'LineString', coordinates },
-    center,
-  };
+  radiusKm: number;
+  planeOffset: number;
+}
+
+interface LocalFrame {
+  point: Vector3;
+  tangent: Vector3;
+  normal: Vector3;
+  startCoordinate: [number, number];
 }
 
 /**
- * 지구를 한 바퀴 도는 Great Circle (대원) 생성
+ * Converts longitude/latitude (degrees) to a 3D unit vector on the unit sphere.
+ */
+function latLonToVector([lng, lat]: [number, number]): Vector3 {
+  const lonRad = degToRad(lng);
+  const latRad = degToRad(lat);
+  const cosLat = Math.cos(latRad);
+  return [Math.cos(lonRad) * cosLat, Math.sin(lonRad) * cosLat, Math.sin(latRad)];
+}
+
+/**
+ * Converts a 3D unit vector back to longitude/latitude (degrees).
+ */
+function vectorToLonLat([x, y, z]: Vector3): [number, number] {
+  const lon = Math.atan2(y, x);
+  const lat = Math.asin(clamp(z, -1, 1));
+  return [radToDeg(lon), radToDeg(lat)];
+}
+
+const degToRad = (deg: number) => (deg * Math.PI) / 180;
+const radToDeg = (rad: number) => (rad * 180) / Math.PI;
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const add = (a: Vector3, b: Vector3): Vector3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const subtract = (a: Vector3, b: Vector3): Vector3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const scale = (v: Vector3, s: number): Vector3 => [v[0] * s, v[1] * s, v[2] * s];
+const dot = (a: Vector3, b: Vector3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a: Vector3, b: Vector3): Vector3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+const length = (v: Vector3) => Math.hypot(v[0], v[1], v[2]);
+const normalize = (v: Vector3): Vector3 => {
+  const len = length(v);
+  if (len < EPSILON) {
+    return [0, 0, 0];
+  }
+  return [v[0] / len, v[1] / len, v[2] / len];
+};
+
+function rotateVectorAroundAxis(vector: Vector3, axis: Vector3, angle: number): Vector3 {
+  const unitAxis = normalize(axis);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const term1 = scale(vector, cos);
+  const term2 = scale(cross(unitAxis, vector), sin);
+  const term3 = scale(unitAxis, dot(unitAxis, vector) * (1 - cos));
+  return normalize(add(add(term1, term2), term3));
+}
+
+function buildCircleGeometry({
+  normal,
+  pointOnPlane,
+  steps,
+  startCoordinate,
+}: CircleGeometryParams): CircleGeometryResult {
+  const unitNormal = normalize(normal);
+  const clampedSteps = Math.max(3, Math.floor(steps));
+  const planeOffset = clamp(dot(unitNormal, pointOnPlane), -1, 1);
+  const radiusFactor = Math.max(0, Math.sqrt(Math.max(0, 1 - planeOffset * planeOffset)));
+
+  // Degenerate case: plane tangent to sphere, the circle collapses to the reference point.
+  if (radiusFactor < 1e-6) {
+    const coordinate = startCoordinate ?? vectorToLonLat(pointOnPlane);
+    const coordinates = Array.from({ length: clampedSteps + 1 }, () => coordinate);
+    return {
+      geometry: { type: 'LineString', coordinates },
+      radiusKm: 0,
+      planeOffset,
+    };
+  }
+
+  const centerVec = scale(unitNormal, planeOffset);
+  const u = normalize(subtract(pointOnPlane, centerVec));
+  let v = normalize(cross(unitNormal, u));
+  if (length(v) < EPSILON) {
+    // Fallback: use cross with an arbitrary axis if u is parallel to the normal.
+    v = normalize(cross(unitNormal, [1, 0, 0]));
+  }
+
+  const coordinates: [number, number][] = [];
+  for (let i = 0; i <= clampedSteps; i++) {
+    const angle = (2 * Math.PI * i) / clampedSteps;
+    let pointVec = add(
+      centerVec,
+      add(scale(u, radiusFactor * Math.cos(angle)), scale(v, radiusFactor * Math.sin(angle)))
+    );
+    pointVec = normalize(pointVec);
+    coordinates.push(vectorToLonLat(pointVec));
+  }
+
+  const enforcedStart = startCoordinate ?? vectorToLonLat(pointOnPlane);
+  coordinates[0] = enforcedStart;
+  coordinates[coordinates.length - 1] = enforcedStart;
+
+  return {
+    geometry: { type: 'LineString', coordinates },
+    radiusKm: EARTH_HALF_CIRCUMFERENCE * radiusFactor,
+    planeOffset,
+  };
+}
+
+function getLocalFrame(origin: [number, number], bearing: number): LocalFrame {
+  const startCoordinate: [number, number] = [origin[0], origin[1]];
+  const point = normalize(latLonToVector(origin));
+  const lonRad = degToRad(origin[0]);
+  const latRad = degToRad(origin[1]);
+
+  let north: Vector3 = [
+    -Math.cos(lonRad) * Math.sin(latRad),
+    -Math.sin(lonRad) * Math.sin(latRad),
+    Math.cos(latRad),
+  ];
+  if (length(north) < EPSILON) {
+    north = [0, 0, origin[1] >= 0 ? -1 : 1];
+  }
+  north = normalize(north);
+
+  let east: Vector3 = [-Math.sin(lonRad), Math.cos(lonRad), 0];
+  if (length(east) < EPSILON) {
+    east = [0, 1, 0];
+  }
+  east = normalize(east);
+
+  const bearingRad = degToRad(((bearing % 360) + 360) % 360);
+  let tangent = add(scale(north, Math.cos(bearingRad)), scale(east, Math.sin(bearingRad)));
+  if (length(tangent) < EPSILON) {
+    tangent = east;
+  }
+  tangent = normalize(tangent);
+
+  let normal = normalize(cross(point, tangent));
+  if (length(normal) < EPSILON) {
+    // If origin is at a pole, fall back to a plane normal aligned with longitude.
+    normal = normalize(cross(point, [0, 1, 0]));
+  }
+
+  return { point, tangent, normal, startCoordinate };
+}
+
+/**
+ * Generates the great circle defined by the user's location (P) and an initial bearing.
+ *
+ * - The returned LineString is a closed loop whose first/last coordinate equals `origin`.
+ * - The curve lies entirely on the sphere and passes through `origin`.
  */
 export function generateGreatCircleLine(
   origin: [number, number],
   bearing: number,
-  steps: number = 200
+  steps: number = 360
 ): GeoJSON.LineString {
-  const coordinates: [number, number][] = [];
-  const earthCircumference = 40075;
-  const stepDistance = earthCircumference / steps;
-
-  for (let i = 0; i <= steps; i++) {
-    const distance = stepDistance * i;
-    const point = turf.destination(origin, distance, bearing, { units: 'kilometers' });
-    coordinates.push(point.geometry.coordinates as [number, number]);
-  }
-
-  return { type: 'LineString', coordinates };
+  const frame = getLocalFrame(origin, bearing);
+  const circle = buildCircleGeometry({
+    normal: frame.normal,
+    pointOnPlane: frame.point,
+    steps,
+    startCoordinate: frame.startCoordinate,
+  });
+  return circle.geometry;
 }
 
 /**
- * 3점을 지나는 원 생성
+ * Generates a member of set A: the intersection of the sphere with a plane that
+ * passes through the current location P. The plane is derived by rotating the
+ * great-circle plane around the tangent vector at P.
+ *
+ * @param origin  Current user location (P) in [lng, lat].
+ * @param bearing Initial bearing (clockwise from north) defining the reference great circle.
+ * @param offset  Slider position in [-1, 1]. 0 → great circle, +1 → N-hemisphere tangent, -1 → S-hemisphere tangent.
+ * @param steps   Number of samples for the resulting LineString.
+ *
+ * The returned LineString is always closed, always contains `origin`, and shrinks
+ * smoothly as |offset| increases. When |offset| → 1 the circle converges to the point P.
+ */
+export function generateCircleThroughPoint(
+  origin: [number, number],
+  bearing: number,
+  offset: number,
+  steps: number = 360
+): {
+  geometry: GeoJSON.LineString;
+  center: [number, number];
+  radiusKm: number;
+  planeOffset: number;
+} {
+  const frame = getLocalFrame(origin, bearing);
+  const clampedOffset = clamp(offset, -1, 1);
+
+  if (Math.abs(clampedOffset) < 1e-4) {
+    return {
+      geometry: generateGreatCircleLine(origin, bearing, steps),
+      center: origin,
+      radiusKm: EARTH_HALF_CIRCUMFERENCE,
+      planeOffset: 0,
+    };
+  }
+
+  const theta = clampedOffset * MAX_OFFSET_ANGLE;
+  const rotatedNormal = rotateVectorAroundAxis(frame.normal, frame.tangent, theta);
+  const circle = buildCircleGeometry({
+    normal: rotatedNormal,
+    pointOnPlane: frame.point,
+    steps,
+    startCoordinate: frame.startCoordinate,
+  });
+
+  return {
+    geometry: circle.geometry,
+    center: origin,
+    radiusKm: circle.radiusKm,
+    planeOffset: circle.planeOffset,
+  };
+}
+
+/**
+ * Generates the unique circle passing through the user location and two picked points.
+ * The three points define a plane; the returned LineString is the intersection of
+ * that plane with the sphere, producing a closed curve that contains all three points.
  */
 export function generateCircleFromThreePoints(
   point1: [number, number],
   point2: [number, number],
   point3: [number, number],
-  steps: number = 200
+  steps: number = 360
 ): { geometry: GeoJSON.LineString; center: [number, number]; radius: number } | null {
-  const bearing12 = turf.bearing(point1, point2);
-  const bearing13 = turf.bearing(point1, point3);
-  
-  const bearingDiff = Math.abs(bearing12 - bearing13);
-  if (bearingDiff < 5 || (bearingDiff > 175 && bearingDiff < 185) || bearingDiff > 355) {
+  const a = latLonToVector(point1);
+  const b = latLonToVector(point2);
+  const c = latLonToVector(point3);
+
+  const normal = cross(subtract(b, a), subtract(c, a));
+  if (length(normal) < EPSILON) {
     return null;
   }
 
-  const mid12 = turf.midpoint(point1, point2);
-  const mid23 = turf.midpoint(point2, point3);
-  
-  const perpBearing12 = (bearing12 + 90) % 360;
-  const perpBearing23 = (turf.bearing(point2, point3) + 90) % 360;
-  
-  let minDistance = Infinity;
-  let center: [number, number] = mid12.geometry.coordinates as [number, number];
-  
-  for (let d1 = -10000; d1 <= 10000; d1 += 100) {
-    const p1 = turf.destination(mid12.geometry.coordinates as [number, number], d1, perpBearing12, { units: 'kilometers' });
-    
-    for (let d2 = -10000; d2 <= 10000; d2 += 100) {
-      const p2 = turf.destination(mid23.geometry.coordinates as [number, number], d2, perpBearing23, { units: 'kilometers' });
-      
-      const dist = turf.distance(p1, p2, { units: 'kilometers' });
-      if (dist < minDistance) {
-        minDistance = dist;
-        center = p1.geometry.coordinates as [number, number];
-      }
-    }
-  }
-  
-  const radius = turf.distance(center, point1, { units: 'kilometers' });
-  
-  const coordinates: [number, number][] = [];
-  for (let i = 0; i <= steps; i++) {
-    const angle = (360 / steps) * i;
-    const point = turf.destination(center, radius, angle, { units: 'kilometers' });
-    coordinates.push(point.geometry.coordinates as [number, number]);
-  }
+  const circle = buildCircleGeometry({
+    normal,
+    pointOnPlane: a,
+    steps,
+    startCoordinate: point1,
+  });
 
   return {
-    geometry: { type: 'LineString', coordinates },
-    center,
-    radius,
+    geometry: circle.geometry,
+    center: point1,
+    radius: circle.radiusKm,
   };
 }
 
@@ -238,16 +338,16 @@ export function findNearestPointOnLine(
 }
 
 /**
- * tilt 값에서 표시용 반경 계산
+ * offset 값에서 표시용 반경 계산
+ * offset = 0: 대원 (20037 km)
+ * offset = ±1: 점 (0 km)
  */
-export function tiltToDisplayRadius(tilt: number): number {
-  const absTilt = Math.abs(tilt);
-  if (absTilt < 1) return EARTH_HALF_CIRCUMFERENCE;
-  
-  // tilt가 커질수록 반경이 줄어듦
-  const tiltStrength = absTilt / 90;
-  return EARTH_HALF_CIRCUMFERENCE * (1 - tiltStrength * 0.99);
+export function offsetToDisplayRadius(offset: number): number {
+  const clampedOffset = clamp(offset, -1, 1);
+  const theta = Math.abs(clampedOffset) * MAX_OFFSET_ANGLE;
+  const radiusFactor = Math.max(0, Math.cos(theta));
+  return EARTH_HALF_CIRCUMFERENCE * radiusFactor;
 }
 
 // 상수 export
-export { EARTH_HALF_CIRCUMFERENCE };
+export { EARTH_HALF_CIRCUMFERENCE, EARTH_RADIUS_KM, MAX_OFFSET_ANGLE };

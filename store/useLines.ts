@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Line, UserLocation, LineCreationStep, LineCreationConfig, LineZone, SearchPin } from '@/types';
+import { EARTH_HALF_CIRCUMFERENCE } from '@/lib/lineGenerator';
 
 interface LinesState {
   lines: Line[];
@@ -9,7 +10,7 @@ interface LinesState {
   creationConfig: LineCreationConfig;
   previewGeometry: GeoJSON.LineString | null;
   previewCenter: [number, number] | null;
-  tilt: number; // -90 ~ 0 ~ 90 (0 = 대원)
+  offset: number; // -1 ~ 0 ~ +1 (0 = 대원)
   
   addLine: (line: Line) => void;
   removeLine: (id: string) => void;
@@ -19,7 +20,7 @@ interface LinesState {
   goBack: () => void;
   setCreationMode: (mode: 'direction' | 'points') => void;
   setBearing: (bearing: number) => void;
-  setTilt: (tilt: number) => void;
+  setOffset: (offset: number) => void;
   addSelectedPoint: (point: [number, number]) => void;
   removeSelectedPoint: (index: number) => void;
   clearSelectedPoints: () => void;
@@ -38,7 +39,7 @@ const initialCreationConfig: LineCreationConfig = {
   bearing: 0,
   selectedPoints: [],
   maxRiders: 10,
-  radius: 20037.5,
+  radius: EARTH_HALF_CIRCUMFERENCE,
   zones: [],
 };
 
@@ -50,7 +51,7 @@ export const useLines = create<LinesState>((set, get) => ({
   creationConfig: initialCreationConfig,
   previewGeometry: null,
   previewCenter: null,
-  tilt: 0, // 0 = 대원 (중앙)
+  offset: 0, // 0 = 대원 (중앙)
 
   addLine: (line) =>
     set((state) => ({ lines: [...state.lines, line] })),
@@ -77,13 +78,13 @@ export const useLines = create<LinesState>((set, get) => ({
           creationConfig: { ...initialCreationConfig },
           previewGeometry: null,
           previewCenter: null,
-          tilt: 0,
+          offset: 0,
         });
         break;
       case 'customize':
         set({ 
           creationStep: creationConfig.mode === 'direction' ? 'select-direction' : 'select-points',
-          tilt: 0,
+          offset: 0,
         });
         break;
       case 'add-zone':
@@ -104,8 +105,8 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: { ...state.creationConfig, bearing },
     })),
 
-  setTilt: (tilt) =>
-    set({ tilt: Math.max(-90, Math.min(90, tilt)) }),
+  setOffset: (offset) =>
+    set({ offset: Math.max(-1, Math.min(1, offset)) }),
 
   addSelectedPoint: (point) =>
     set((state) => ({
@@ -173,7 +174,7 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: initialCreationConfig,
       previewGeometry: null,
       previewCenter: null,
-      tilt: 0,
+      offset: 0,
     }),
 
   startCreation: () =>
@@ -182,6 +183,6 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: initialCreationConfig,
       previewGeometry: null,
       previewCenter: null,
-      tilt: 0,
+      offset: 0,
     }),
 }));

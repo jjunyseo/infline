@@ -2,7 +2,7 @@
 
 import { useLines } from '@/store/useLines';
 import { Line } from '@/types';
-import { getRandomLineColor, tiltToDisplayRadius } from '@/lib/lineGenerator';
+import { getRandomLineColor, offsetToDisplayRadius } from '@/lib/lineGenerator';
 
 export default function LineCreator() {
   const {
@@ -11,11 +11,11 @@ export default function LineCreator() {
     userLocation,
     previewGeometry,
     previewCenter,
-    tilt,
+    offset,
     setCreationStep,
     setCreationMode,
     setMaxRiders,
-    setTilt,
+    setOffset,
     goBack,
     resetCreation,
     removeSelectedPoint,
@@ -35,17 +35,17 @@ export default function LineCreator() {
   };
 
   // 슬라이더 변경 시
-  // 슬라이더: 0 ~ 100 (50 = 대원, 0 = 왼쪽 최대, 100 = 오른쪽 최대)
+  // 슬라이더: 0 ~ 100 (50 = 중앙 = 대원)
+  // offset: -1 ~ 0 ~ +1
   const handleSliderChange = (value: number) => {
-    // 50을 기준으로 tilt 계산
-    const newTilt = ((value - 50) / 50) * 90; // -90 ~ 0 ~ 90
-    setTilt(newTilt);
+    const newOffset = (value - 50) / 50; // -1 ~ 0 ~ +1
+    setOffset(newOffset);
   };
 
-  // tilt에서 슬라이더 값으로
-  const sliderValue = 50 + (tilt / 90) * 50; // 0 ~ 100
+  // offset에서 슬라이더 값으로
+  const sliderValue = 50 + offset * 50; // 0 ~ 100
 
-  const displayRadius = tiltToDisplayRadius(tilt);
+  const displayRadius = offsetToDisplayRadius(offset);
 
   const handleSaveLine = () => {
     if (!userLocation || !previewGeometry) return;
@@ -203,7 +203,7 @@ export default function LineCreator() {
 
         <div className="p-4 bg-[#1a1a24] rounded-xl border border-[#3a3a4a]">
           <ul className="text-xs text-gray-400 space-y-1">
-            <li>• 지도에서 <span className="text-white">선을 드래그</span>하여 평면 회전</li>
+            <li>• 지도에서 <span className="text-white">선을 드래그</span>하여 원 크기 조절</li>
             <li>• 지도에서 <span className="text-white">선 위를 클릭</span>하여 구역 추가</li>
           </ul>
         </div>
@@ -212,15 +212,15 @@ export default function LineCreator() {
           {creationConfig.mode === 'direction' && (
             <div className="p-3 bg-[#1a1a24] rounded-lg border border-[#3a3a4a]">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-400">평면 회전</span>
+                <span className="text-sm text-gray-400">원 크기</span>
                 <span className="text-sm text-white font-medium">
-                  {Math.abs(tilt) < 1 ? '대원' : `${tilt > 0 ? '→' : '←'} ${Math.abs(Math.round(tilt))}°`}
+                  {Math.abs(offset) < 0.02 ? '대원' : `${Math.round(displayRadius).toLocaleString()} km`}
                 </span>
               </div>
               <div className="flex justify-between text-xs text-gray-500 mb-1">
-                <span>← 왼쪽 (점)</span>
+                <span>S 반구 (점)</span>
                 <span>대원</span>
-                <span>오른쪽 (점) →</span>
+                <span>N 반구 (점)</span>
               </div>
               <div className="relative">
                 <input
@@ -234,9 +234,11 @@ export default function LineCreator() {
                 {/* 중앙 표시 */}
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-4 bg-[#ffe66d] rounded pointer-events-none" />
               </div>
-              <div className="text-xs text-gray-500 mt-2 text-center">
-                반경: {Math.round(displayRadius).toLocaleString()} km
-              </div>
+              {Math.abs(offset) >= 0.02 && (
+                <div className="text-xs text-gray-500 mt-2 text-center">
+                  {offset > 0 ? 'N 반구 방향 (오른쪽)' : 'S 반구 방향 (왼쪽)'}
+                </div>
+              )}
             </div>
           )}
 

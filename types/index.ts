@@ -6,24 +6,18 @@ export interface Line {
   geometry: GeoJSON.LineString;
   color: string;
   name?: string;
-  
-  // 선 설정
   maxRiders: number;
   riderCount: number;
-  
-  // 원의 정보
   center: [number, number];
-  radius: number; // km
-  bearing: number; // 방향각
-  
-  // 구역 설정
+  radius: number;
+  bearing: number;
   zones: LineZone[];
 }
 
 export interface LineZone {
   id: string;
   center: [number, number];
-  radius: number; // km, 최대 5km
+  radius: number;
 }
 
 export interface UserLocation {
@@ -38,34 +32,24 @@ export interface SearchResult {
 }
 
 export interface SearchPin {
-  id: string;
   center: [number, number];
-  name: string;
+  place_name: string;
 }
 
-// 선 생성 단계
 export type LineCreationStep = 
-  | 'idle'           // 대기 (아무것도 안함)
-  | 'select-mode'    // 모드 선택 (방향/위치)
-  | 'select-direction' // 방향 선택 중
-  | 'select-points'    // 2점 선택 중
-  | 'customize'        // 선 커스터마이징 (반경, 구역 조절)
-  | 'add-zone'         // 구역 추가 중
+  | 'select-mode'
+  | 'select-direction'
+  | 'select-points'
+  | 'customize'
+  | 'add-zone';
 
-// 선 생성 설정
 export interface LineCreationConfig {
   mode: 'direction' | 'points';
-  
-  // 방향 모드용
   bearing: number;
-  
-  // 2점 모드용
   selectedPoints: [number, number][];
-  
-  // 공통 설정
   maxRiders: number;
-  radius: number; // km (기본값: 지구 둘레 절반)
+  radius: number;
   zones: LineZone[];
 }
 
-export type SidebarTab = 'create' | 'lines' | 'settings';
+export type SidebarTab = 'create' | 'lines';
