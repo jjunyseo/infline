@@ -1,26 +1,26 @@
 import * as turf from '@turf/turf';
 
-export interface CircleLineOptions {
-  origin: [number, number]; // [lng, lat] - 사용자 위치
-  bearing: number; // 방향각 (0-360)
-  radius: number; // 반경 (km)
-  steps?: number;
-}
-
 /**
- * 사용자 위치를 지나고 특정 방향/반경의 원 생성
+ * 사용자 위치를 지나는 원 생성
  * - origin: 사용자 위치 (원이 지나가는 점)
- * - bearing: 원의 방향 (사용자 위치에서 원의 중심 방향)
- * - radius: 원의 반경
+ * - bearing: 원이 향하는 방향 (사용자 위치에서 원의 중심 반대 방향)
+ * - radius: 원의 반경 (km)
+ * 
+ * 원은 항상 사용자 위치를 지나며, bearing 방향으로 뻗어나감
  */
-export function generateCircleLine(options: CircleLineOptions): {
+export function generateCircleLine(
+  origin: [number, number],
+  bearing: number,
+  radius: number,
+  steps: number = 200
+): {
   geometry: GeoJSON.LineString;
   center: [number, number];
 } {
-  const { origin, bearing, radius, steps = 200 } = options;
-  
-  // 원의 중심 계산: 사용자 위치에서 bearing 방향으로 radius만큼 떨어진 점
-  const centerPoint = turf.destination(origin, radius, bearing, { units: 'kilometers' });
+  // 원의 중심: origin에서 bearing의 반대 방향으로 radius만큼 떨어진 점
+  // 이렇게 하면 원이 origin을 지나면서 bearing 방향으로 뻗어나감
+  const oppositeBearing = (bearing + 180) % 360;
+  const centerPoint = turf.destination(origin, radius, oppositeBearing, { units: 'kilometers' });
   const center = centerPoint.geometry.coordinates as [number, number];
   
   // 원 생성
@@ -32,10 +32,7 @@ export function generateCircleLine(options: CircleLineOptions): {
   }
 
   return {
-    geometry: {
-      type: 'LineString',
-      coordinates,
-    },
+    geometry: { type: 'LineString', coordinates },
     center,
   };
 }
@@ -58,10 +55,7 @@ export function generateGreatCircleLine(
     coordinates.push(point.geometry.coordinates as [number, number]);
   }
 
-  return {
-    type: 'LineString',
-    coordinates,
-  };
+  return { type: 'LineString', coordinates };
 }
 
 /**
@@ -73,7 +67,6 @@ export function generateCircleFromThreePoints(
   point3: [number, number],
   steps: number = 200
 ): { geometry: GeoJSON.LineString; center: [number, number]; radius: number } | null {
-  // 3점이 한 직선 위에 있는지 확인
   const bearing12 = turf.bearing(point1, point2);
   const bearing13 = turf.bearing(point1, point3);
   
@@ -82,7 +75,6 @@ export function generateCircleFromThreePoints(
     return null;
   }
 
-  // 두 점의 수직이등분선 교점 찾기 (근사)
   const mid12 = turf.midpoint(point1, point2);
   const mid23 = turf.midpoint(point2, point3);
   
@@ -123,15 +115,14 @@ export function generateCircleFromThreePoints(
 }
 
 /**
- * 구역 원 생성 (최대 5km)
+ * 구역 원 생성
  */
 export function generateZoneCircle(
   center: [number, number],
   radius: number,
   steps: number = 64
 ): GeoJSON.Polygon {
-  const clampedRadius = Math.min(radius, 5);
-  const circle = turf.circle(center, clampedRadius, { steps, units: 'kilometers' });
+  const circle = turf.circle(center, radius, { steps, units: 'kilometers' });
   return circle.geometry;
 }
 
@@ -182,4 +173,32 @@ export function findNearestPointOnLine(
   });
 
   return { point: nearestPoint, distance: minDist, index: nearestIndex };
+}
+
+/**
+ * 드래그 위치로부터 새 반경 계산
+ * - 오른쪽/왼쪽 드래그에 따라 원이 해당 방향으로 축소됨
+ */
+export function calculateRadiusFromDrag(
+  origin: [number, number],
+  bearing: number,
+  dragPoint: [number, number],
+  startRadius: number
+): number {
+  // 드래그 포인트에서 origin까지의 거리
+  const distanceToOrigin = turf.distance(origin, dragPoint, { units: 'kilometers' });
+  
+  // bearing 방향에 수직인 방향으로 얼마나 이동했는지 계산
+  const dragBearing = turf.bearing(origin, dragPoint);
+  const bearingDiff = dragBearing - bearing;
+  
+  // bearing 방향과의 각도 차이에 따라 반경 조절
+  // 90도 차이면 원래 반경 유지, 0도/180도 차이면 최대 변화
+  const factor = Math.cos(bearingDiff * Math.PI / 180);
+  
+  // 새 반경 계산: 드래그 거리에 따라 반경 변화
+  const radiusChange = distanceToOrigin * factor * 0.5;
+  const newRadius = Math.max(50, Math.min(startRadius - radiusChange, 20037));
+  
+  return newRadius;
 }

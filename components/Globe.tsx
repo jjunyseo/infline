@@ -19,13 +19,20 @@ interface GlobeProps {
   onMapReady?: (map: mapboxgl.Map) => void;
 }
 
+const EARTH_HALF_CIRCUMFERENCE = 20037.5;
+
 export default function Globe({ onMapReady }: GlobeProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const userMarker = useRef<mapboxgl.Marker | null>(null);
   const searchPinMarker = useRef<mapboxgl.Marker | null>(null);
   const pointMarkers = useRef<mapboxgl.Marker[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
+  const zoneMarkers = useRef<mapboxgl.Marker[]>([]);
+  
+  const [isDraggingRadius, setIsDraggingRadius] = useState(false);
+  const [isDraggingZone, setIsDraggingZone] = useState(false);
+  const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
+  const [isNearLine, setIsNearLine] = useState(false);
 
   const {
     lines,
@@ -41,6 +48,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
     setPreviewGeometry,
     addSelectedPoint,
     addZone,
+    updateZone,
   } = useLines();
 
   // 지도 초기화
@@ -61,7 +69,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
     map.current.on('load', () => {
       if (!map.current) return;
 
-      // 대기 효과
       map.current.setFog({
         color: 'rgb(20, 20, 30)',
         'high-color': 'rgb(40, 40, 60)',
@@ -70,7 +77,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
         'star-intensity': 0.6,
       });
 
-      // 저장된 라인용 소스
+      // 저장된 라인
       map.current.addSource('saved-lines', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -87,7 +94,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
         },
       });
 
-      // 프리뷰 라인용 소스
+      // 프리뷰 라인
       map.current.addSource('preview-line', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -104,7 +111,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
         },
       });
 
-      // 구역 표시용 소스
+      // 구역
       map.current.addSource('zones', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
@@ -134,7 +141,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
       onMapReady?.(map.current);
     });
 
-    // 사용자 위치 가져오기
+    // 사용자 위치
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const location = {
@@ -143,15 +150,13 @@ export default function Globe({ onMapReady }: GlobeProps) {
         };
         setUserLocation(location);
         
-        // 사용자 위치로 이동
         map.current?.flyTo({
           center: [location.lon, location.lat],
           zoom: 3,
           duration: 2000,
         });
       },
-      (error) => {
-        console.error('Geolocation error:', error);
+      () => {
         setUserLocation({ lat: 37.5665, lon: 126.978 });
       }
     );
@@ -172,24 +177,8 @@ export default function Globe({ onMapReady }: GlobeProps) {
       const el = document.createElement('div');
       el.innerHTML = `
         <div style="position: relative; width: 20px; height: 20px;">
-          <div style="
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            background: #4264fb;
-            border-radius: 50%;
-            border: 3px solid white;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.4);
-          "></div>
-          <div class="user-marker-ring" style="
-            position: absolute;
-            width: 40px;
-            height: 40px;
-            background: rgba(66, 100, 251, 0.3);
-            border-radius: 50%;
-            top: -10px;
-            left: -10px;
-          "></div>
+          <div style="position: absolute; width: 20px; height: 20px; background: #4264fb; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 10px rgba(0,0,0,0.4);"></div>
+          <div class="user-marker-ring" style="position: absolute; width: 40px; height: 40px; background: rgba(66, 100, 251, 0.3); border-radius: 50%; top: -10px; left: -10px;"></div>
         </div>
       `;
 
@@ -211,14 +200,11 @@ export default function Globe({ onMapReady }: GlobeProps) {
     if (searchPin) {
       const el = document.createElement('div');
       el.innerHTML = `
-        <div style="position: relative;">
-          <svg width="32" height="40" viewBox="0 0 32 40" fill="none">
-            <path d="M16 0C7.16 0 0 7.16 0 16C0 28 16 40 16 40S32 28 32 16C32 7.16 24.84 0 16 0Z" fill="#ff6b6b"/>
-            <circle cx="16" cy="14" r="6" fill="white"/>
-          </svg>
-        </div>
+        <svg width="32" height="40" viewBox="0 0 32 40" fill="none">
+          <path d="M16 0C7.16 0 0 7.16 0 16C0 28 16 40 16 40S32 28 32 16C32 7.16 24.84 0 16 0Z" fill="#ff6b6b"/>
+          <circle cx="16" cy="14" r="6" fill="white"/>
+        </svg>
       `;
-      el.style.cursor = 'pointer';
 
       searchPinMarker.current = new mapboxgl.Marker(el, { anchor: 'bottom' })
         .setLngLat(searchPin.center)
@@ -228,7 +214,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
 
   // 선택된 점 마커
   useEffect(() => {
-    pointMarkers.current.forEach((marker) => marker.remove());
+    pointMarkers.current.forEach((m) => m.remove());
     pointMarkers.current = [];
 
     if (!map.current || creationStep !== 'select-points') return;
@@ -236,57 +222,59 @@ export default function Globe({ onMapReady }: GlobeProps) {
     creationConfig.selectedPoints.forEach((point, index) => {
       const el = document.createElement('div');
       el.innerHTML = `
-        <div style="
-          width: 28px;
-          height: 28px;
-          background: #00d4aa;
-          border-radius: 50%;
-          border: 3px solid white;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-size: 12px;
-          font-weight: bold;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.4);
-        ">${index + 1}</div>
+        <div style="width: 28px; height: 28px; background: #00d4aa; border-radius: 50%; border: 3px solid white; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: bold; box-shadow: 0 2px 10px rgba(0,0,0,0.4);">${index + 1}</div>
       `;
 
-      const marker = new mapboxgl.Marker(el)
-        .setLngLat(point)
-        .addTo(map.current!);
-
+      const marker = new mapboxgl.Marker(el).setLngLat(point).addTo(map.current!);
       pointMarkers.current.push(marker);
     });
   }, [creationStep, creationConfig.selectedPoints]);
 
+  // 구역 마커 (중심점)
+  useEffect(() => {
+    zoneMarkers.current.forEach((m) => m.remove());
+    zoneMarkers.current = [];
+
+    if (!map.current) return;
+    if (creationStep !== 'customize' && creationStep !== 'add-zone') return;
+
+    creationConfig.zones.forEach((zone, index) => {
+      const el = document.createElement('div');
+      el.innerHTML = `
+        <div style="width: 24px; height: 24px; background: #ff6b6b; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: move;">${index + 1}</div>
+      `;
+
+      const marker = new mapboxgl.Marker(el, { draggable: true })
+        .setLngLat(zone.center)
+        .addTo(map.current!);
+
+      marker.on('dragend', () => {
+        const lngLat = marker.getLngLat();
+        updateZone(zone.id, { center: [lngLat.lng, lngLat.lat] });
+      });
+
+      zoneMarkers.current.push(marker);
+    });
+  }, [creationStep, creationConfig.zones, updateZone]);
+
   // 저장된 라인 업데이트
   useEffect(() => {
-    if (!map.current) return;
+    if (!map.current?.isStyleLoaded()) return;
 
-    const updateLines = () => {
-      const source = map.current?.getSource('saved-lines') as mapboxgl.GeoJSONSource;
-      if (source) {
-        const features = lines.map((line) => ({
-          type: 'Feature' as const,
-          properties: { id: line.id, color: line.color },
-          geometry: line.geometry,
-        }));
-        source.setData({ type: 'FeatureCollection', features });
-      }
-    };
-
-    if (map.current.isStyleLoaded()) {
-      updateLines();
-    } else {
-      map.current.on('load', updateLines);
+    const source = map.current.getSource('saved-lines') as mapboxgl.GeoJSONSource;
+    if (source) {
+      const features = lines.map((line) => ({
+        type: 'Feature' as const,
+        properties: { id: line.id, color: line.color },
+        geometry: line.geometry,
+      }));
+      source.setData({ type: 'FeatureCollection', features });
     }
   }, [lines]);
 
-  // 프리뷰 라인 계산 및 업데이트
+  // 프리뷰 라인 계산
   useEffect(() => {
-    if (!map.current || !userLocation) return;
-    if (!map.current.isStyleLoaded()) return;
+    if (!map.current?.isStyleLoaded() || !userLocation) return;
 
     const source = map.current.getSource('preview-line') as mapboxgl.GeoJSONSource;
     if (!source) return;
@@ -294,33 +282,50 @@ export default function Globe({ onMapReady }: GlobeProps) {
     let geometry: GeoJSON.LineString | null = null;
     let center: [number, number] | null = null;
 
-    if (creationStep === 'select-direction' || creationStep === 'customize') {
-      if (creationConfig.mode === 'direction') {
-        if (creationConfig.radius >= 20000) {
+    // 방향 모드
+    if (creationConfig.mode === 'direction') {
+      if (creationStep === 'select-direction' || creationStep === 'customize') {
+        if (creationConfig.radius >= EARTH_HALF_CIRCUMFERENCE - 100) {
+          // 대원
           geometry = generateGreatCircleLine(
             [userLocation.lon, userLocation.lat],
             creationConfig.bearing
           );
           center = [userLocation.lon, userLocation.lat];
         } else {
-          const result = generateCircleLine({
-            origin: [userLocation.lon, userLocation.lat],
-            bearing: creationConfig.bearing,
-            radius: creationConfig.radius,
-          });
+          // 커스텀 반경 원
+          const result = generateCircleLine(
+            [userLocation.lon, userLocation.lat],
+            creationConfig.bearing,
+            creationConfig.radius
+          );
           geometry = result.geometry;
           center = result.center;
         }
       }
-    } else if (creationStep === 'select-points' && creationConfig.selectedPoints.length === 2) {
-      const result = generateCircleFromThreePoints(
-        [userLocation.lon, userLocation.lat],
-        creationConfig.selectedPoints[0],
-        creationConfig.selectedPoints[1]
-      );
-      if (result) {
-        geometry = result.geometry;
-        center = result.center;
+    }
+    // 위치 모드
+    else if (creationConfig.mode === 'points') {
+      if (creationStep === 'select-points' && creationConfig.selectedPoints.length === 2) {
+        const result = generateCircleFromThreePoints(
+          [userLocation.lon, userLocation.lat],
+          creationConfig.selectedPoints[0],
+          creationConfig.selectedPoints[1]
+        );
+        if (result) {
+          geometry = result.geometry;
+          center = result.center;
+        }
+      } else if (creationStep === 'customize' && creationConfig.selectedPoints.length === 2) {
+        const result = generateCircleFromThreePoints(
+          [userLocation.lon, userLocation.lat],
+          creationConfig.selectedPoints[0],
+          creationConfig.selectedPoints[1]
+        );
+        if (result) {
+          geometry = result.geometry;
+          center = result.center;
+        }
       }
     }
 
@@ -333,22 +338,20 @@ export default function Globe({ onMapReady }: GlobeProps) {
       source.setData({ type: 'FeatureCollection', features: [] });
     }
 
-    // 프리뷰 geometry 저장 (별도 호출)
     setPreviewGeometry(geometry, center);
   }, [
-    userLocation, 
-    creationStep, 
-    creationConfig.mode, 
-    creationConfig.bearing, 
-    creationConfig.radius, 
+    userLocation,
+    creationStep,
+    creationConfig.mode,
+    creationConfig.bearing,
+    creationConfig.radius,
     creationConfig.selectedPoints,
     setPreviewGeometry,
   ]);
 
   // 구역 표시 업데이트
   useEffect(() => {
-    if (!map.current) return;
-    if (!map.current.isStyleLoaded()) return;
+    if (!map.current?.isStyleLoaded()) return;
 
     const source = map.current.getSource('zones') as mapboxgl.GeoJSONSource;
     if (!source) return;
@@ -380,10 +383,9 @@ export default function Globe({ onMapReady }: GlobeProps) {
     source.setData({ type: 'FeatureCollection', features: zoneFeatures });
   }, [lines, creationStep, creationConfig.zones]);
 
-  // 지도 인터랙션 핸들러
+  // 인터랙션 핸들러
   useEffect(() => {
     if (!map.current) return;
-
     const canvas = map.current.getCanvas();
 
     // 방향 선택 모드
@@ -417,10 +419,9 @@ export default function Globe({ onMapReady }: GlobeProps) {
       const handleClick = (e: mapboxgl.MapMouseEvent) => {
         addSelectedPoint([e.lngLat.lng, e.lngLat.lat]);
         
+        // 2점 다 선택되면 커스터마이징으로
         if (creationConfig.selectedPoints.length >= 1) {
-          setTimeout(() => {
-            setCreationStep('customize');
-          }, 100);
+          setTimeout(() => setCreationStep('customize'), 100);
         }
       };
 
@@ -435,83 +436,98 @@ export default function Globe({ onMapReady }: GlobeProps) {
 
     // 커스터마이징 모드
     if (creationStep === 'customize') {
+      let dragStartPoint: [number, number] | null = null;
       let startRadius = creationConfig.radius;
-      let startDistance = 0;
-      let localDragging = false;
-
-      const handleMouseDown = (e: mapboxgl.MapMouseEvent) => {
-        if (!userLocation || !previewGeometry) return;
-
-        const coords = previewGeometry.coordinates as [number, number][];
-        const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
-
-        if (nearest.distance < 100) {
-          localDragging = true;
-          setIsDragging(true);
-          startRadius = creationConfig.radius;
-          startDistance = calculateDistance(
-            [userLocation.lon, userLocation.lat],
-            [e.lngLat.lng, e.lngLat.lat]
-          );
-          canvas.style.cursor = 'grabbing';
-          map.current?.dragPan.disable();
-        }
-      };
 
       const handleMouseMove = (e: mapboxgl.MapMouseEvent) => {
-        if (!localDragging || !userLocation) return;
-
-        const currentDistance = calculateDistance(
-          [userLocation.lon, userLocation.lat],
-          [e.lngLat.lng, e.lngLat.lat]
-        );
-
-        const radiusChange = currentDistance - startDistance;
-        const newRadius = Math.max(100, Math.min(startRadius + radiusChange, 20037));
-        setRadius(newRadius);
-      };
-
-      const handleMouseUp = () => {
-        if (localDragging) {
-          localDragging = false;
-          setIsDragging(false);
-          canvas.style.cursor = 'grab';
-          map.current?.dragPan.enable();
-        }
-      };
-
-      const handleClick = (e: mapboxgl.MapMouseEvent) => {
-        if (isDragging) return;
         if (!previewGeometry) return;
         
         const coords = previewGeometry.coordinates as [number, number][];
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
+        
+        // 선에 가까우면 커서 변경
+        if (nearest.distance < 200) {
+          setIsNearLine(true);
+          canvas.style.cursor = isDraggingRadius ? 'grabbing' : 'grab';
+        } else {
+          setIsNearLine(false);
+          canvas.style.cursor = 'default';
+        }
 
-        if (nearest.distance < 50) {
+        // 반경 드래그 중
+        if (isDraggingRadius && userLocation && dragStartPoint) {
+          const dragDistance = calculateDistance(dragStartPoint, [e.lngLat.lng, e.lngLat.lat]);
+          const dragBearing = calculateBearing(dragStartPoint, [e.lngLat.lng, e.lngLat.lat]);
+          const lineBearing = creationConfig.bearing;
+          
+          // 드래그 방향이 선의 방향과 같은 쪽인지 반대쪽인지
+          const bearingDiff = ((dragBearing - lineBearing + 540) % 360) - 180;
+          const direction = bearingDiff > -90 && bearingDiff < 90 ? 1 : -1;
+          
+          // 반경 변화량
+          const radiusChange = dragDistance * direction * 2;
+          const newRadius = Math.max(50, Math.min(startRadius - radiusChange, EARTH_HALF_CIRCUMFERENCE));
+          setRadius(newRadius);
+        }
+      };
+
+      const handleMouseDown = (e: mapboxgl.MapMouseEvent) => {
+        if (!previewGeometry || !isNearLine) return;
+        
+        const coords = previewGeometry.coordinates as [number, number][];
+        const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
+        
+        if (nearest.distance < 200) {
+          setIsDraggingRadius(true);
+          dragStartPoint = [e.lngLat.lng, e.lngLat.lat];
+          startRadius = creationConfig.radius;
+          map.current?.dragPan.disable();
+          canvas.style.cursor = 'grabbing';
+        }
+      };
+
+      const handleMouseUp = () => {
+        if (isDraggingRadius) {
+          setIsDraggingRadius(false);
+          dragStartPoint = null;
+          map.current?.dragPan.enable();
+          canvas.style.cursor = isNearLine ? 'grab' : 'default';
+        }
+      };
+
+      const handleClick = (e: mapboxgl.MapMouseEvent) => {
+        if (isDraggingRadius) return;
+        if (!previewGeometry || !isNearLine) return;
+        
+        const coords = previewGeometry.coordinates as [number, number][];
+        const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
+        
+        // 선 위 클릭 → 구역 추가
+        if (nearest.distance < 200) {
           const newZone: LineZone = {
             id: `zone-${Date.now()}`,
             center: nearest.point,
-            radius: 2.5,
+            radius: 100, // 기본 100km
           };
           addZone(newZone);
-
+          setEditingZoneId(newZone.id);
+          
           map.current?.flyTo({
             center: nearest.point,
-            zoom: 10,
+            zoom: 8,
             duration: 1000,
           });
         }
       };
 
-      map.current.on('mousedown', handleMouseDown);
       map.current.on('mousemove', handleMouseMove);
+      map.current.on('mousedown', handleMouseDown);
       map.current.on('mouseup', handleMouseUp);
       map.current.on('click', handleClick);
-      canvas.style.cursor = 'grab';
 
       return () => {
-        map.current?.off('mousedown', handleMouseDown);
         map.current?.off('mousemove', handleMouseMove);
+        map.current?.off('mousedown', handleMouseDown);
         map.current?.off('mouseup', handleMouseUp);
         map.current?.off('click', handleClick);
         map.current?.dragPan.enable();
@@ -521,49 +537,107 @@ export default function Globe({ onMapReady }: GlobeProps) {
 
     // 구역 추가 모드
     if (creationStep === 'add-zone') {
-      const handleClick = (e: mapboxgl.MapMouseEvent) => {
+      const handleMouseMove = (e: mapboxgl.MapMouseEvent) => {
         if (!previewGeometry) return;
-
+        
         const coords = previewGeometry.coordinates as [number, number][];
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
+        
+        if (nearest.distance < 200) {
+          setIsNearLine(true);
+          // 핀 커서
+          canvas.style.cursor = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'32\' viewBox=\'0 0 24 32\'%3E%3Cpath d=\'M12 0C5.37 0 0 5.37 0 12c0 9 12 20 12 20s12-11 12-20c0-6.63-5.37-12-12-12z\' fill=\'%23ff6b6b\'/%3E%3Ccircle cx=\'12\' cy=\'10\' r=\'4\' fill=\'white\'/%3E%3C/svg%3E") 12 32, crosshair';
+        } else {
+          setIsNearLine(false);
+          canvas.style.cursor = 'crosshair';
+        }
 
-        if (nearest.distance < 100) {
+        // 구역 드래그 중이면 반경 조절
+        if (isDraggingZone && editingZoneId) {
+          const zone = creationConfig.zones.find(z => z.id === editingZoneId);
+          if (zone) {
+            const newRadius = calculateDistance(zone.center, [e.lngLat.lng, e.lngLat.lat]);
+            updateZone(editingZoneId, { radius: newRadius });
+          }
+        }
+      };
+
+      const handleMouseDown = (e: mapboxgl.MapMouseEvent) => {
+        if (!previewGeometry) return;
+        
+        // 기존 구역 클릭 확인
+        for (const zone of creationConfig.zones) {
+          const dist = calculateDistance(zone.center, [e.lngLat.lng, e.lngLat.lat]);
+          if (dist < zone.radius + 50) {
+            setIsDraggingZone(true);
+            setEditingZoneId(zone.id);
+            map.current?.dragPan.disable();
+            return;
+          }
+        }
+      };
+
+      const handleMouseUp = () => {
+        if (isDraggingZone) {
+          setIsDraggingZone(false);
+          map.current?.dragPan.enable();
+        }
+      };
+
+      const handleClick = (e: mapboxgl.MapMouseEvent) => {
+        if (isDraggingZone) return;
+        if (!previewGeometry || !isNearLine) return;
+        
+        const coords = previewGeometry.coordinates as [number, number][];
+        const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
+        
+        if (nearest.distance < 200) {
           const newZone: LineZone = {
             id: `zone-${Date.now()}`,
             center: nearest.point,
-            radius: 2.5,
+            radius: 100,
           };
           addZone(newZone);
+          setEditingZoneId(newZone.id);
           setCreationStep('customize');
-
+          
           map.current?.flyTo({
             center: nearest.point,
-            zoom: 10,
+            zoom: 8,
             duration: 1000,
           });
         }
       };
 
+      map.current.on('mousemove', handleMouseMove);
+      map.current.on('mousedown', handleMouseDown);
+      map.current.on('mouseup', handleMouseUp);
       map.current.on('click', handleClick);
-      canvas.style.cursor = 'crosshair';
 
       return () => {
+        map.current?.off('mousemove', handleMouseMove);
+        map.current?.off('mousedown', handleMouseDown);
+        map.current?.off('mouseup', handleMouseUp);
         map.current?.off('click', handleClick);
+        map.current?.dragPan.enable();
         canvas.style.cursor = '';
       };
     }
   }, [
     creationStep,
     userLocation,
-    creationConfig.radius,
-    creationConfig.selectedPoints,
+    creationConfig,
     previewGeometry,
-    isDragging,
+    isDraggingRadius,
+    isDraggingZone,
+    isNearLine,
+    editingZoneId,
     setBearing,
     setRadius,
     setCreationStep,
     addSelectedPoint,
     addZone,
+    updateZone,
   ]);
 
   return (
@@ -590,7 +664,9 @@ export default function Globe({ onMapReady }: GlobeProps) {
       {creationStep === 'customize' && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-[#1a1a24]/90 backdrop-blur-sm px-6 py-3 rounded-full border border-[#ffe66d]/50 z-10">
           <p className="text-sm text-white">
-            ⚙️ 선을 드래그하여 반경 조절 · 선 위 클릭으로 구역 추가
+            {isNearLine 
+              ? '✋ 드래그로 반경 조절 · 클릭으로 구역 추가' 
+              : '⚙️ 선 위로 마우스를 이동하세요'}
           </p>
         </div>
       )}
@@ -598,7 +674,9 @@ export default function Globe({ onMapReady }: GlobeProps) {
       {creationStep === 'add-zone' && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-[#1a1a24]/90 backdrop-blur-sm px-6 py-3 rounded-full border border-[#ff6b6b]/50 z-10">
           <p className="text-sm text-white">
-            🎯 선 위의 위치를 클릭하여 구역 추가
+            {isNearLine 
+              ? '📍 클릭하여 구역 추가' 
+              : '🎯 선 위로 마우스를 이동하세요'}
           </p>
         </div>
       )}

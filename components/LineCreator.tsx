@@ -19,6 +19,7 @@ export default function LineCreator() {
     resetCreation,
     removeSelectedPoint,
     removeZone,
+    updateZone,
     addLine,
   } = useLines();
 
@@ -61,7 +62,6 @@ export default function LineCreator() {
         <div>
           <h3 className="text-sm font-semibold text-gray-400 mb-3">생성 방식 선택</h3>
           <div className="space-y-2">
-            {/* 방향 선택 방식 */}
             <button
               onClick={handleStartDirectionMode}
               disabled={!userLocation}
@@ -82,7 +82,6 @@ export default function LineCreator() {
               </div>
             </button>
 
-            {/* 2점 선택 방식 */}
             <button
               onClick={handleStartPointsMode}
               disabled={!userLocation}
@@ -173,11 +172,9 @@ export default function LineCreator() {
           </p>
         </div>
 
-        {/* 선택된 점 표시 */}
         <div className="space-y-2">
           <h4 className="text-xs font-medium text-gray-400">선택된 위치</h4>
 
-          {/* 내 위치 */}
           <div className="flex items-center gap-2 p-3 bg-[#4264fb]/10 border border-[#4264fb]/30 rounded-lg">
             <div className="w-6 h-6 bg-[#4264fb] rounded-full flex items-center justify-center">
               <span className="text-white text-xs">나</span>
@@ -186,7 +183,6 @@ export default function LineCreator() {
             <span className="text-xs text-gray-500 ml-auto">고정</span>
           </div>
 
-          {/* 선택한 점들 */}
           {creationConfig.selectedPoints.map((point, index) => (
             <div
               key={index}
@@ -209,7 +205,6 @@ export default function LineCreator() {
             </div>
           ))}
 
-          {/* 빈 슬롯 */}
           {Array.from({ length: 2 - creationConfig.selectedPoints.length }).map((_, index) => (
             <div
               key={`empty-${index}`}
@@ -241,47 +236,42 @@ export default function LineCreator() {
           </button>
           <div className="flex items-center gap-2 text-[#ffe66d]">
             <span className="text-xl">⚙️</span>
-            <span className="font-medium">선 커스터마이징</span>
+            <span className="font-medium">선 설정</span>
           </div>
         </div>
 
-        {/* 안내 */}
         <div className="p-4 bg-[#1a1a24] rounded-xl border border-[#3a3a4a]">
-          <p className="text-sm text-gray-300 mb-2">
-            선을 조절하세요:
-          </p>
-          <ul className="text-xs text-gray-500 space-y-1">
-            <li>• <span className="text-white">선을 드래그</span>하여 반경 조절</li>
-            <li>• <span className="text-white">선 위를 클릭</span>하여 구역 추가</li>
+          <ul className="text-xs text-gray-400 space-y-1">
+            <li>• 지도에서 <span className="text-white">선을 드래그</span>하여 반경 조절</li>
+            <li>• 지도에서 <span className="text-white">선 위를 클릭</span>하여 구역 추가</li>
           </ul>
         </div>
 
-        {/* 현재 설정 표시 */}
         <div className="space-y-3">
-          <h4 className="text-xs font-medium text-gray-400">현재 설정</h4>
-
-          {/* 반경 */}
-          <div className="p-3 bg-[#1a1a24] rounded-lg border border-[#3a3a4a]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-400">반경</span>
-              <span className="text-sm text-white font-medium">
-                {creationConfig.radius >= 20000 
-                  ? '지구 한 바퀴 (대원)' 
-                  : `${creationConfig.radius.toLocaleString()} km`}
-              </span>
+          {/* 반경 (방향 모드만) */}
+          {creationConfig.mode === 'direction' && (
+            <div className="p-3 bg-[#1a1a24] rounded-lg border border-[#3a3a4a]">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-gray-400">반경</span>
+                <span className="text-sm text-white font-medium">
+                  {creationConfig.radius >= 20000 
+                    ? '대원 (지구 한 바퀴)' 
+                    : `${Math.round(creationConfig.radius).toLocaleString()} km`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="50"
+                max="20037"
+                value={creationConfig.radius}
+                onChange={(e) => setRadius(Number(e.target.value))}
+                className="w-full h-2 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer
+                           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 
+                           [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#4264fb] 
+                           [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+              />
             </div>
-            <input
-              type="range"
-              min="100"
-              max="20037"
-              value={creationConfig.radius}
-              onChange={(e) => setRadius(Number(e.target.value))}
-              className="w-full h-2 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer
-                         [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 
-                         [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#4264fb] 
-                         [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-            />
-          </div>
+          )}
 
           {/* 최대 인원 */}
           <div className="p-3 bg-[#1a1a24] rounded-lg border border-[#3a3a4a]">
@@ -309,7 +299,7 @@ export default function LineCreator() {
             <h4 className="text-xs font-medium text-gray-400">탑승 구역</h4>
             <button
               onClick={() => setCreationStep('add-zone')}
-              className="text-xs text-[#4264fb] hover:text-[#5a7bfc] transition-colors"
+              className="text-xs text-[#ff6b6b] hover:text-[#ff8787] transition-colors"
             >
               + 구역 추가
             </button>
@@ -323,22 +313,37 @@ export default function LineCreator() {
             creationConfig.zones.map((zone, index) => (
               <div
                 key={zone.id}
-                className="flex items-center gap-2 p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg"
+                className="p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg"
               >
-                <div className="w-6 h-6 bg-[#ff6b6b] rounded-full flex items-center justify-center">
-                  <span className="text-white text-xs">{index + 1}</span>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-6 h-6 bg-[#ff6b6b] rounded-full flex items-center justify-center">
+                    <span className="text-white text-xs">{index + 1}</span>
+                  </div>
+                  <span className="text-sm text-white flex-1">구역 {index + 1}</span>
+                  <button
+                    onClick={() => removeZone(zone.id)}
+                    className="text-gray-500 hover:text-red-400 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
-                <div className="flex-1">
-                  <span className="text-sm text-white">반경 {zone.radius.toFixed(1)}km</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">반경</span>
+                  <input
+                    type="range"
+                    min="1"
+                    max="500"
+                    value={zone.radius}
+                    onChange={(e) => updateZone(zone.id, { radius: Number(e.target.value) })}
+                    className="flex-1 h-1.5 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer
+                               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 
+                               [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#ff6b6b] 
+                               [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+                  />
+                  <span className="text-xs text-white w-16 text-right">{Math.round(zone.radius)} km</span>
                 </div>
-                <button
-                  onClick={() => removeZone(zone.id)}
-                  className="text-gray-500 hover:text-red-400 transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
               </div>
             ))
           )}
@@ -352,7 +357,7 @@ export default function LineCreator() {
             className="w-full py-3 bg-[#4264fb] hover:bg-[#5a7bfc] text-white font-semibold 
                        rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            선 저장하기
+            ✓ 선 저장하기
           </button>
           <button
             onClick={resetCreation}
@@ -380,7 +385,7 @@ export default function LineCreator() {
             </svg>
           </button>
           <div className="flex items-center gap-2 text-[#ff6b6b]">
-            <span className="text-xl">🎯</span>
+            <span className="text-xl">📍</span>
             <span className="font-medium">구역 추가</span>
           </div>
         </div>
@@ -390,10 +395,18 @@ export default function LineCreator() {
             선 위의 위치를 클릭하세요.
           </p>
           <p className="text-xs text-gray-500">
-            클릭한 위치를 중심으로 구역이 생성됩니다.
-            <br />반경은 최대 5km입니다.
+            선에 가까이 가면 커서가 바뀝니다.
+            <br />클릭 후 드래그로 반경을 조절할 수 있습니다.
           </p>
         </div>
+
+        <button
+          onClick={goBack}
+          className="w-full py-3 bg-[#2a2a3a] hover:bg-[#3a3a4a] text-gray-300 
+                     font-medium rounded-lg transition-colors"
+        >
+          뒤로
+        </button>
       </div>
     );
   }
