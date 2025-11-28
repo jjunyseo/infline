@@ -1,19 +1,15 @@
 import * as turf from '@turf/turf';
 
-const EARTH_HALF_CIRCUMFERENCE = 20037.5; // km
+const EARTH_HALF_CIRCUMFERENCE = 20037.5; // km (지구 둘레의 절반)
+const EARTH_QUARTER_CIRCUMFERENCE = 10018.75; // km (지구 둘레의 1/4, 반바퀴)
 
 /**
  * 대원과 접하면서 사용자 위치를 지나는 원 생성
  * 
  * - origin: 사용자 위치 (원이 지나는 점)
  * - bearing: 대원의 방향
- * - radius: 원의 반경 (대원일 때 EARTH_HALF_CIRCUMFERENCE)
+ * - radius: 원의 반경 (대원일 때 EARTH_HALF_CIRCUMFERENCE, 최소 반바퀴까지)
  * - shrinkDirection: 축소 방향 ('left' = bearing-90, 'right' = bearing+90)
- * 
- * 원리:
- * - 대원: 사용자 위치를 지나며 bearing 방향으로 진행
- * - 축소된 원: 대원의 접선 방향으로 사용자 위치에서 벗어나지 않으며 축소
- * - 원의 중심은 사용자 위치에서 접선에 수직인 방향(축소 방향)으로 이동
  */
 export function generateCircleWithDirection(
   origin: [number, number],
@@ -26,15 +22,7 @@ export function generateCircleWithDirection(
   center: [number, number];
 } {
   // 대원인 경우 (radius가 최대에 가까움)
-  if (radius >= EARTH_HALF_CIRCUMFERENCE - 100) {
-    return {
-      geometry: generateGreatCircleLine(origin, bearing, steps),
-      center: origin,
-    };
-  }
-
-  // 축소 방향이 없으면 기본 대원 반환
-  if (!shrinkDirection) {
+  if (radius >= EARTH_HALF_CIRCUMFERENCE - 100 || !shrinkDirection) {
     return {
       geometry: generateGreatCircleLine(origin, bearing, steps),
       center: origin,
@@ -42,8 +30,6 @@ export function generateCircleWithDirection(
   }
 
   // 원의 중심 방향 계산
-  // 접선 방향 = bearing (대원을 따라가는 방향)
-  // 수직 방향 = bearing ± 90도 (축소 방향)
   const centerBearing = shrinkDirection === 'right' 
     ? (bearing + 90) % 360 
     : (bearing - 90 + 360) % 360;
@@ -52,7 +38,7 @@ export function generateCircleWithDirection(
   const centerPoint = turf.destination(origin, radius, centerBearing, { units: 'kilometers' });
   const center = centerPoint.geometry.coordinates as [number, number];
   
-  // 원 생성 (중심에서 radius 거리에 있는 점들)
+  // 원 생성 (정확히 한 바퀴만, 360도)
   const coordinates: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const angle = (360 / steps) * i;
@@ -129,6 +115,7 @@ export function generateCircleFromThreePoints(
   
   const radius = turf.distance(center, point1, { units: 'kilometers' });
   
+  // 정확히 한 바퀴만 그리기
   const coordinates: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const angle = (360 / steps) * i;
@@ -206,7 +193,6 @@ export function findNearestPointOnLine(
 
 /**
  * 드래그 방향으로부터 축소 방향 결정
- * bearing 기준으로 왼쪽/오른쪽 판단
  */
 export function determineShrinkDirection(
   origin: [number, number],
@@ -215,11 +201,12 @@ export function determineShrinkDirection(
 ): 'left' | 'right' {
   const dragBearing = turf.bearing(origin, dragPoint);
   
-  // bearing과 dragBearing의 차이 계산 (-180 ~ 180)
   let diff = dragBearing - bearing;
   if (diff > 180) diff -= 360;
   if (diff < -180) diff += 360;
   
-  // 양수면 오른쪽, 음수면 왼쪽
   return diff >= 0 ? 'right' : 'left';
 }
+
+// 상수 export
+export { EARTH_HALF_CIRCUMFERENCE, EARTH_QUARTER_CIRCUMFERENCE };

@@ -1,18 +1,18 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useLines } from '@/store/useLines';
 import {
   generateCircleWithDirection,
-  generateGreatCircleLine,
   generateCircleFromThreePoints,
   generateZoneCircle,
   calculateBearing,
   calculateDistance,
   findNearestPointOnLine,
   determineShrinkDirection,
+  EARTH_HALF_CIRCUMFERENCE,
 } from '@/lib/lineGenerator';
 import { LineZone } from '@/types';
 
@@ -20,7 +20,7 @@ interface GlobeProps {
   onMapReady?: (map: mapboxgl.Map) => void;
 }
 
-const EARTH_HALF_CIRCUMFERENCE = 20037.5;
+const MIN_RADIUS = 50;
 
 export default function Globe({ onMapReady }: GlobeProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -34,6 +34,9 @@ export default function Globe({ onMapReady }: GlobeProps) {
   const [isDraggingZone, setIsDraggingZone] = useState(false);
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   const [isNearLine, setIsNearLine] = useState(false);
+  
+  // 드래그 시작점 저장
+  const dragStartRef = useRef<{ point: [number, number]; radius: number } | null>(null);
 
   const {
     lines,
@@ -271,7 +274,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
     }
   }, [lines]);
 
-  // 프리뷰 라인 계산
+  // 프리뷰 라인 계산 (하나의 원만 표시)
   useEffect(() => {
     if (!map.current?.isStyleLoaded() || !userLocation) return;
 
@@ -310,6 +313,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
       }
     }
 
+    // 하나의 원만 표시
     if (geometry) {
       source.setData({
         type: 'FeatureCollection',
@@ -415,8 +419,6 @@ export default function Globe({ onMapReady }: GlobeProps) {
 
     // 커스터마이징 모드
     if (creationStep === 'customize') {
-      let dragStartRadius = creationConfig.radius;
-
       const handleMouseMove = (e: mapboxgl.MapMouseEvent) => {
         if (!previewGeometry) return;
         
@@ -431,25 +433,26 @@ export default function Globe({ onMapReady }: GlobeProps) {
           canvas.style.cursor = 'default';
         }
 
-        // 반경 드래그 중
-        if (isDraggingRadius && userLocation) {
-          const dragDistance = calculateDistance(
-            [userLocation.lon, userLocation.lat],
-            [e.lngLat.lng, e.lngLat.lat]
-          );
+        // 반경 드래그 중 - 연속적 업데이트
+        if (isDraggingRadius && userLocation && dragStartRef.current) {
+          const currentPoint: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+          const origin: [number, number] = [userLocation.lon, userLocation.lat];
           
-          // 축소 방향이 없으면 결정
+          // 드래그 거리 계산 (시작점에서 현재점까지)
+          const dragDistance = calculateDistance(dragStartRef.current.point, currentPoint);
+          
+          // 드래그 방향 결정 (한번만)
           if (!shrinkDirection) {
-            const direction = determineShrinkDirection(
-              [userLocation.lon, userLocation.lat],
-              [e.lngLat.lng, e.lngLat.lat],
-              creationConfig.bearing
-            );
+            const direction = determineShrinkDirection(origin, currentPoint, creationConfig.bearing);
             setShrinkDirection(direction);
           }
           
-          // 드래그 거리에 따라 반경 조절 (대원에서 시작, 드래그할수록 작아짐)
-          const newRadius = Math.max(50, EARTH_HALF_CIRCUMFERENCE - dragDistance * 2);
+          // 반경 연속 계산: 드래그 거리에 비례해서 줄어듦
+          // 대원에서 시작, 드래그할수록 작아짐
+          const maxDrag = 5000; // 최대 드래그 거리 (km)
+          const ratio = Math.min(dragDistance / maxDrag, 1);
+          const newRadius = EARTH_HALF_CIRCUMFERENCE - ratio * (EARTH_HALF_CIRCUMFERENCE - MIN_RADIUS);
+          
           setRadius(newRadius);
         }
       };
@@ -462,7 +465,10 @@ export default function Globe({ onMapReady }: GlobeProps) {
         
         if (nearest.distance < 200) {
           setIsDraggingRadius(true);
-          dragStartRadius = creationConfig.radius;
+          dragStartRef.current = {
+            point: [e.lngLat.lng, e.lngLat.lat],
+            radius: creationConfig.radius,
+          };
           map.current?.dragPan.disable();
           canvas.style.cursor = 'grabbing';
         }
@@ -471,6 +477,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
       const handleMouseUp = () => {
         if (isDraggingRadius) {
           setIsDraggingRadius(false);
+          dragStartRef.current = null;
           map.current?.dragPan.enable();
           canvas.style.cursor = isNearLine ? 'grab' : 'default';
         }
@@ -642,9 +649,11 @@ export default function Globe({ onMapReady }: GlobeProps) {
       {creationStep === 'customize' && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-[#1a1a24]/90 backdrop-blur-sm px-6 py-3 rounded-full border border-[#ffe66d]/50 z-10">
           <p className="text-sm text-white">
-            {isNearLine 
-              ? '✋ 드래그로 반경 조절 · 클릭으로 구역 추가' 
-              : '⚙️ 선 위로 마우스를 이동하세요'}
+            {isDraggingRadius 
+              ? `📐 반경: ${Math.round(creationConfig.radius).toLocaleString()} km`
+              : isNearLine 
+                ? '✋ 드래그로 반경 조절 · 클릭으로 구역 추가' 
+                : '⚙️ 선 위로 마우스를 이동하세요'}
           </p>
         </div>
       )}

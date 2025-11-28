@@ -1,28 +1,20 @@
 import { create } from 'zustand';
 import { Line, UserLocation, LineCreationStep, LineCreationConfig, LineZone, SearchPin } from '@/types';
 
+// 반경 범위: 대원(20037.5km) ~ 반바퀴 원(50km)
+const EARTH_HALF_CIRCUMFERENCE = 20037.5;
+const MIN_RADIUS = 50; // 최소 반경
+
 interface LinesState {
-  // 선 데이터
   lines: Line[];
-  
-  // 사용자 위치
   userLocation: UserLocation | null;
-  
-  // 검색 핀
   searchPin: SearchPin | null;
-  
-  // 선 생성 상태
   creationStep: LineCreationStep;
   creationConfig: LineCreationConfig;
-  
-  // 프리뷰 (별도 관리)
   previewGeometry: GeoJSON.LineString | null;
   previewCenter: [number, number] | null;
-  
-  // 축소 방향 (드래그로 결정, 'left' = bearing-90, 'right' = bearing+90)
   shrinkDirection: 'left' | 'right' | null;
   
-  // Actions
   addLine: (line: Line) => void;
   removeLine: (id: string) => void;
   setUserLocation: (location: UserLocation) => void;
@@ -46,14 +38,12 @@ interface LinesState {
   startCreation: () => void;
 }
 
-const EARTH_HALF_CIRCUMFERENCE = 20037.5; // km
-
 const initialCreationConfig: LineCreationConfig = {
   mode: 'direction',
   bearing: 0,
   selectedPoints: [],
   maxRiders: 10,
-  radius: EARTH_HALF_CIRCUMFERENCE, // 대원 = 최대값 = 슬라이더 중간
+  radius: EARTH_HALF_CIRCUMFERENCE,
   zones: [],
 };
 
@@ -83,7 +73,7 @@ export const useLines = create<LinesState>((set, get) => ({
     set({ creationStep: step }),
 
   goBack: () => {
-    const { creationStep } = get();
+    const { creationStep, creationConfig } = get();
     switch (creationStep) {
       case 'select-direction':
       case 'select-points':
@@ -96,9 +86,8 @@ export const useLines = create<LinesState>((set, get) => ({
         });
         break;
       case 'customize':
-        const mode = get().creationConfig.mode;
         set({ 
-          creationStep: mode === 'direction' ? 'select-direction' : 'select-points',
+          creationStep: creationConfig.mode === 'direction' ? 'select-direction' : 'select-points',
           shrinkDirection: null,
           creationConfig: { ...get().creationConfig, radius: EARTH_HALF_CIRCUMFERENCE },
         });
@@ -125,7 +114,7 @@ export const useLines = create<LinesState>((set, get) => ({
     set((state) => ({
       creationConfig: { 
         ...state.creationConfig, 
-        radius: Math.max(50, Math.min(radius, EARTH_HALF_CIRCUMFERENCE)) 
+        radius: Math.max(MIN_RADIUS, Math.min(radius, EARTH_HALF_CIRCUMFERENCE)) 
       },
     })),
 
