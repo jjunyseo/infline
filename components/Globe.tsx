@@ -17,7 +17,8 @@ import { LineZone } from '@/types';
 
 const MIN_LINE_COORDINATES = 32;
 const LOOP_CLOSURE_TOLERANCE_KM = 20; // tolerate small numerical errors
-const MAX_ORIGIN_DEVIATION_KM = 5000; // only enforced for preview lines
+const MAX_ORIGIN_DEVIATION_KM = 25; // preview line must start near origin
+const ORIGIN_INTERSECTION_TOLERANCE_KM = 5; // preview line must pass through origin
 
 const isFiniteCoordinate = (coord: [number, number]) =>
   Array.isArray(coord) &&
@@ -46,8 +47,17 @@ function validateLineString(
     return false;
   }
 
-  if (origin && calculateDistance(origin, first) > MAX_ORIGIN_DEVIATION_KM) {
-    return false;
+  if (origin) {
+    if (calculateDistance(origin, first) > MAX_ORIGIN_DEVIATION_KM) {
+      return false;
+    }
+
+    const touchesOrigin = coordinates.some(
+      (coord) => calculateDistance(origin, coord) <= ORIGIN_INTERSECTION_TOLERANCE_KM
+    );
+    if (!touchesOrigin) {
+      return false;
+    }
   }
 
   return true;
