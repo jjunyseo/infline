@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Line, UserLocation, LineCreationMode, LineCreationConfig, LineZone } from '@/types';
+import { Line, UserLocation, LineCreationStep, LineCreationConfig, LineZone, SearchPin } from '@/types';
 
 interface LinesState {
   // 선 데이터
@@ -8,13 +8,12 @@ interface LinesState {
   // 사용자 위치
   userLocation: UserLocation | null;
   
-  // 선 생성 상태
-  creationMode: LineCreationMode;
-  creationConfig: LineCreationConfig;
-  previewBearing: number;
+  // 검색 핀
+  searchPin: SearchPin | null;
   
-  // 사이드바 상태
-  isSidebarOpen: boolean;
+  // 선 생성 상태
+  creationStep: LineCreationStep;
+  creationConfig: LineCreationConfig;
   
   // Actions - 선 관리
   addLine: (line: Line) => void;
@@ -23,17 +22,22 @@ interface LinesState {
   // Actions - 사용자 위치
   setUserLocation: (location: UserLocation) => void;
   
-  // Actions - 선 생성
-  setCreationMode: (mode: LineCreationMode) => void;
-  setPreviewBearing: (bearing: number) => void;
+  // Actions - 검색 핀
+  setSearchPin: (pin: SearchPin | null) => void;
+  
+  // Actions - 선 생성 단계
+  setCreationStep: (step: LineCreationStep) => void;
+  goBack: () => void;
   
   // Actions - 선 생성 설정
-  setCreationConfigMode: (mode: 'direction' | 'points') => void;
+  setCreationMode: (mode: 'direction' | 'points') => void;
+  setBearing: (bearing: number) => void;
+  setRadius: (radius: number) => void;
   addSelectedPoint: (point: [number, number]) => void;
   removeSelectedPoint: (index: number) => void;
   clearSelectedPoints: () => void;
   setMaxRiders: (count: number) => void;
-  setCustomRadius: (radius: number | undefined) => void;
+  setPreviewGeometry: (geometry: GeoJSON.LineString | null, center: [number, number] | null) => void;
   
   // Actions - 구역 설정
   addZone: (zone: LineZone) => void;
@@ -41,28 +45,30 @@ interface LinesState {
   updateZone: (id: string, updates: Partial<LineZone>) => void;
   clearZones: () => void;
   
-  // Actions - 사이드바
-  toggleSidebar: () => void;
-  setSidebarOpen: (open: boolean) => void;
-  
   // Actions - 리셋
   resetCreation: () => void;
+  startCreation: () => void;
 }
+
+const EARTH_HALF_CIRCUMFERENCE = 20037.5; // km
 
 const initialCreationConfig: LineCreationConfig = {
   mode: 'direction',
+  bearing: 0,
   selectedPoints: [],
   maxRiders: 10,
+  radius: EARTH_HALF_CIRCUMFERENCE,
   zones: [],
+  previewGeometry: null,
+  previewCenter: null,
 };
 
-export const useLines = create<LinesState>((set) => ({
+export const useLines = create<LinesState>((set, get) => ({
   lines: [],
   userLocation: null,
-  creationMode: 'idle',
+  searchPin: null,
+  creationStep: 'select-mode',
   creationConfig: initialCreationConfig,
-  previewBearing: 0,
-  isSidebarOpen: false,
 
   // 선 관리
   addLine: (line) =>
@@ -75,17 +81,52 @@ export const useLines = create<LinesState>((set) => ({
   setUserLocation: (location) =>
     set({ userLocation: location }),
 
-  // 선 생성 모드
-  setCreationMode: (mode) =>
-    set({ creationMode: mode }),
+  // 검색 핀
+  setSearchPin: (pin) =>
+    set({ searchPin: pin }),
 
-  setPreviewBearing: (bearing) =>
-    set({ previewBearing: bearing }),
+  // 선 생성 단계
+  setCreationStep: (step) =>
+    set({ creationStep: step }),
+
+  goBack: () => {
+    const { creationStep } = get();
+    switch (creationStep) {
+      case 'select-direction':
+      case 'select-points':
+        set({ 
+          creationStep: 'select-mode',
+          creationConfig: { ...initialCreationConfig }
+        });
+        break;
+      case 'customize':
+        const mode = get().creationConfig.mode;
+        set({ 
+          creationStep: mode === 'direction' ? 'select-direction' : 'select-points'
+        });
+        break;
+      case 'add-zone':
+        set({ creationStep: 'customize' });
+        break;
+      default:
+        set({ creationStep: 'select-mode' });
+    }
+  },
 
   // 선 생성 설정
-  setCreationConfigMode: (mode) =>
+  setCreationMode: (mode) =>
     set((state) => ({
       creationConfig: { ...state.creationConfig, mode },
+    })),
+
+  setBearing: (bearing) =>
+    set((state) => ({
+      creationConfig: { ...state.creationConfig, bearing },
+    })),
+
+  setRadius: (radius) =>
+    set((state) => ({
+      creationConfig: { ...state.creationConfig, radius: Math.max(100, Math.min(radius, EARTH_HALF_CIRCUMFERENCE)) },
     })),
 
   addSelectedPoint: (point) =>
@@ -114,9 +155,13 @@ export const useLines = create<LinesState>((set) => ({
       creationConfig: { ...state.creationConfig, maxRiders: count },
     })),
 
-  setCustomRadius: (radius) =>
+  setPreviewGeometry: (geometry, center) =>
     set((state) => ({
-      creationConfig: { ...state.creationConfig, customRadius: radius },
+      creationConfig: { 
+        ...state.creationConfig, 
+        previewGeometry: geometry,
+        previewCenter: center,
+      },
     })),
 
   // 구역 설정
@@ -151,18 +196,16 @@ export const useLines = create<LinesState>((set) => ({
       creationConfig: { ...state.creationConfig, zones: [] },
     })),
 
-  // 사이드바
-  toggleSidebar: () =>
-    set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
-
-  setSidebarOpen: (open) =>
-    set({ isSidebarOpen: open }),
-
   // 리셋
   resetCreation: () =>
     set({
-      creationMode: 'idle',
+      creationStep: 'select-mode',
       creationConfig: initialCreationConfig,
-      previewBearing: 0,
+    }),
+
+  startCreation: () =>
+    set({
+      creationStep: 'select-mode',
+      creationConfig: initialCreationConfig,
     }),
 }));

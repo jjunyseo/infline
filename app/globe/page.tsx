@@ -10,7 +10,7 @@ import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLines } from '@/store/useLines';
 
-// SSR 비활성화 (Mapbox는 클라이언트에서만 동작)
+// SSR 비활성화
 const Globe = dynamic(() => import('@/components/Globe'), {
   ssr: false,
   loading: () => (
@@ -26,7 +26,7 @@ const Globe = dynamic(() => import('@/components/Globe'), {
 export default function GlobePage() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const { user, loading, signOut } = useAuth();
-  const { userLocation } = useLines();
+  const { userLocation, setSearchPin } = useLines();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
@@ -34,13 +34,21 @@ export default function GlobePage() {
     mapRef.current = map;
   }, []);
 
-  const handleFlyTo = useCallback((lng: number, lat: number) => {
+  const handleSearchSelect = useCallback((lng: number, lat: number, name: string) => {
+    // 검색 핀 설정
+    setSearchPin({
+      id: `search-${Date.now()}`,
+      center: [lng, lat],
+      name,
+    });
+
+    // 위치로 이동
     mapRef.current?.flyTo({
       center: [lng, lat],
       zoom: 8,
       duration: 2000,
     });
-  }, []);
+  }, [setSearchPin]);
 
   const handleFlyToMyLocation = useCallback(() => {
     if (userLocation) {
@@ -63,16 +71,13 @@ export default function GlobePage() {
 
   return (
     <div className="w-screen h-screen bg-[#0a0a0f] overflow-hidden relative">
-      {/* 사이드바 */}
+      {/* 사이드바 (항상 열림) */}
       <Sidebar />
 
-      {/* 상단 검색바 */}
-      <div className="absolute top-6 left-1/2 -translate-x-1/2 z-20 w-full max-w-md px-4">
+      {/* 상단 검색바 - 사이드바 오른쪽에 배치 */}
+      <div className="absolute top-6 left-[336px] z-20 w-full max-w-md">
         <SearchBox
-          onSelect={(lng, lat, name) => {
-            handleFlyTo(lng, lat);
-            console.log('Selected:', name);
-          }}
+          onSelect={handleSearchSelect}
           placeholder="도시, 장소 검색..."
           className="w-full"
         />
@@ -123,7 +128,6 @@ export default function GlobePage() {
               </span>
             </button>
 
-            {/* 드롭다운 */}
             {isDropdownOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg shadow-xl overflow-hidden">
                 <div className="px-4 py-3 border-b border-[#3a3a4a]">
