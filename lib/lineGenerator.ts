@@ -1,50 +1,66 @@
 import * as turf from '@turf/turf';
 
 const EARTH_HALF_CIRCUMFERENCE = 20037.5; // km (지구 둘레의 절반)
-const EARTH_QUARTER_CIRCUMFERENCE = 10018.75; // km (지구 둘레의 1/4, 반바퀴)
+const MIN_RADIUS = 50; // 최소 반경
 
 /**
- * 대원과 접하면서 사용자 위치를 지나는 원 생성
+ * 대원에서 시작해서 점진적으로 작은 원으로 변형
  * 
- * - origin: 사용자 위치 (원이 지나는 점)
+ * - origin: 사용자 위치 (원이 항상 지나는 점)
  * - bearing: 대원의 방향
- * - radius: 원의 반경 (대원일 때 EARTH_HALF_CIRCUMFERENCE, 최소 반바퀴까지)
- * - shrinkDirection: 축소 방향 ('left' = bearing-90, 'right' = bearing+90)
+ * - offset: 대원에서 얼마나 옆으로 밀렸는지 (0 = 대원, 큰값 = 작은 원)
+ * - shrinkDirection: 밀리는 방향 ('left' = bearing-90, 'right' = bearing+90)
  */
 export function generateCircleWithDirection(
   origin: [number, number],
   bearing: number,
-  radius: number,
+  offset: number,
   shrinkDirection: 'left' | 'right' | null,
   steps: number = 200
 ): {
   geometry: GeoJSON.LineString;
   center: [number, number];
 } {
-  // 대원인 경우 (radius가 최대에 가까움)
-  if (radius >= EARTH_HALF_CIRCUMFERENCE - 100 || !shrinkDirection) {
+  // offset이 0이거나 방향이 없으면 대원
+  if (!shrinkDirection || offset < 10) {
     return {
       geometry: generateGreatCircleLine(origin, bearing, steps),
       center: origin,
     };
   }
 
-  // 원의 중심 방향 계산
-  const centerBearing = shrinkDirection === 'right' 
+  // 옆으로 밀 방향
+  const offsetBearing = shrinkDirection === 'right' 
     ? (bearing + 90) % 360 
     : (bearing - 90 + 360) % 360;
-  
-  // 원의 중심: 사용자 위치에서 centerBearing 방향으로 radius만큼 이동
-  const centerPoint = turf.destination(origin, radius, centerBearing, { units: 'kilometers' });
-  const center = centerPoint.geometry.coordinates as [number, number];
-  
-  // 원 생성 (정확히 한 바퀴만, 360도)
+
+  // 대원의 각 점을 생성하면서 옆으로 밀기
   const coordinates: [number, number][] = [];
+  const earthCircumference = 40075;
+  const stepDistance = earthCircumference / steps;
+
   for (let i = 0; i <= steps; i++) {
-    const angle = (360 / steps) * i;
-    const point = turf.destination(center, radius, angle, { units: 'kilometers' });
-    coordinates.push(point.geometry.coordinates as [number, number]);
+    // 대원 위의 점
+    const distance = stepDistance * i;
+    const greatCirclePoint = turf.destination(origin, distance, bearing, { units: 'kilometers' });
+    const coord = greatCirclePoint.geometry.coordinates as [number, number];
+    
+    // offset 양에 따라 점을 옆으로 이동
+    // 시작점(origin)과 끝점은 고정, 중간(지구 반대편)에서 최대로 이동
+    const progress = i / steps; // 0 ~ 1
+    const actualOffset = offset * Math.sin(progress * Math.PI);
+    
+    if (actualOffset > 10) {
+      const newPoint = turf.destination(coord, actualOffset, offsetBearing, { units: 'kilometers' });
+      coordinates.push(newPoint.geometry.coordinates as [number, number]);
+    } else {
+      coordinates.push(coord);
+    }
   }
+
+  // 원의 중심 계산 (중간 지점)
+  const midIndex = Math.floor(steps / 2);
+  const center = coordinates[midIndex];
 
   return {
     geometry: { type: 'LineString', coordinates },
@@ -61,7 +77,7 @@ export function generateGreatCircleLine(
   steps: number = 200
 ): GeoJSON.LineString {
   const coordinates: [number, number][] = [];
-  const earthCircumference = 40075; // km
+  const earthCircumference = 40075;
   const stepDistance = earthCircumference / steps;
 
   for (let i = 0; i <= steps; i++) {
@@ -115,7 +131,6 @@ export function generateCircleFromThreePoints(
   
   const radius = turf.distance(center, point1, { units: 'kilometers' });
   
-  // 정확히 한 바퀴만 그리기
   const coordinates: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const angle = (360 / steps) * i;
@@ -208,5 +223,17 @@ export function determineShrinkDirection(
   return diff >= 0 ? 'right' : 'left';
 }
 
+/**
+ * offset 값을 "반경"처럼 표시하기 위한 변환
+ * offset이 클수록 원이 작아지므로, 표시용 반경은 역수 관계
+ */
+export function offsetToDisplayRadius(offset: number): number {
+  if (offset < 10) return EARTH_HALF_CIRCUMFERENCE;
+  // offset이 커질수록 표시 반경이 줄어듦
+  const maxOffset = 10000; // 최대 offset
+  const ratio = Math.min(offset / maxOffset, 1);
+  return EARTH_HALF_CIRCUMFERENCE * (1 - ratio * 0.95); // 최소 5%까지
+}
+
 // 상수 export
-export { EARTH_HALF_CIRCUMFERENCE, EARTH_QUARTER_CIRCUMFERENCE };
+export { EARTH_HALF_CIRCUMFERENCE, MIN_RADIUS };

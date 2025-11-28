@@ -2,9 +2,7 @@
 
 import { useLines } from '@/store/useLines';
 import { Line } from '@/types';
-import { getRandomLineColor } from '@/lib/lineGenerator';
-
-const EARTH_HALF_CIRCUMFERENCE = 20037.5;
+import { getRandomLineColor, offsetToDisplayRadius } from '@/lib/lineGenerator';
 
 export default function LineCreator() {
   const {
@@ -14,10 +12,11 @@ export default function LineCreator() {
     previewGeometry,
     previewCenter,
     shrinkDirection,
+    offset,
     setCreationStep,
     setCreationMode,
     setMaxRiders,
-    setRadius,
+    setOffset,
     setShrinkDirection,
     goBack,
     resetCreation,
@@ -37,31 +36,25 @@ export default function LineCreator() {
     setCreationStep('select-points');
   };
 
-  const sliderToRadius = (value: number): number => {
-    const distanceFromCenter = Math.abs(value - 50);
-    return EARTH_HALF_CIRCUMFERENCE - (distanceFromCenter / 50) * (EARTH_HALF_CIRCUMFERENCE - 50);
-  };
-
-  const radiusToSlider = (radius: number): number => {
-    const distanceFromCenter = ((EARTH_HALF_CIRCUMFERENCE - radius) / (EARTH_HALF_CIRCUMFERENCE - 50)) * 50;
-    if (shrinkDirection === 'left') {
-      return 50 - distanceFromCenter;
-    } else if (shrinkDirection === 'right') {
-      return 50 + distanceFromCenter;
-    }
-    return 50;
-  };
-
+  // 슬라이더 변경 시
   const handleSliderChange = (value: number) => {
-    if (value < 50) {
-      setShrinkDirection('left');
-    } else if (value > 50) {
+    // value: 0(대원) ~ 100(최소)
+    // offset: 0(대원) ~ 10000(최소)
+    const newOffset = (value / 100) * 10000;
+    
+    // 방향이 없으면 기본값 설정
+    if (!shrinkDirection && value > 0) {
       setShrinkDirection('right');
-    } else {
+    } else if (value === 0) {
       setShrinkDirection(null);
     }
-    setRadius(sliderToRadius(value));
+    
+    setOffset(newOffset);
   };
+
+  // 현재 슬라이더 값
+  const sliderValue = Math.min((offset / 10000) * 100, 100);
+  const displayRadius = offsetToDisplayRadius(offset);
 
   const handleSaveLine = () => {
     if (!userLocation || !previewGeometry) return;
@@ -76,7 +69,7 @@ export default function LineCreator() {
       maxRiders: creationConfig.maxRiders,
       riderCount: 0,
       center: previewCenter || [userLocation.lon, userLocation.lat],
-      radius: creationConfig.radius,
+      radius: displayRadius,
       bearing: creationConfig.bearing,
       zones: [...creationConfig.zones],
     };
@@ -203,8 +196,6 @@ export default function LineCreator() {
   }
 
   if (creationStep === 'customize') {
-    const sliderValue = radiusToSlider(creationConfig.radius);
-    
     return (
       <div className="p-4 space-y-4">
         <div className="flex items-center gap-2">
@@ -221,7 +212,7 @@ export default function LineCreator() {
 
         <div className="p-4 bg-[#1a1a24] rounded-xl border border-[#3a3a4a]">
           <ul className="text-xs text-gray-400 space-y-1">
-            <li>• 지도에서 <span className="text-white">선을 드래그</span>하여 반경 조절</li>
+            <li>• 지도에서 <span className="text-white">선을 드래그</span>하여 크기 조절</li>
             <li>• 지도에서 <span className="text-white">선 위를 클릭</span>하여 구역 추가</li>
           </ul>
         </div>
@@ -230,30 +221,26 @@ export default function LineCreator() {
           {creationConfig.mode === 'direction' && (
             <div className="p-3 bg-[#1a1a24] rounded-lg border border-[#3a3a4a]">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-400">반경</span>
+                <span className="text-sm text-gray-400">크기</span>
                 <span className="text-sm text-white font-medium">
-                  {creationConfig.radius >= EARTH_HALF_CIRCUMFERENCE - 100 ? '대원' : `${Math.round(creationConfig.radius).toLocaleString()} km`}
+                  {offset < 10 ? '대원 (지구 한 바퀴)' : `${Math.round(displayRadius).toLocaleString()} km`}
                 </span>
               </div>
               <div className="flex justify-between text-xs text-gray-500 mb-1">
-                <span>← 왼쪽</span>
                 <span>대원</span>
-                <span>오른쪽 →</span>
+                <span>작은 원</span>
               </div>
-              <div className="relative">
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={sliderValue}
-                  onChange={(e) => handleSliderChange(Number(e.target.value))}
-                  className="w-full h-2 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#4264fb] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-                />
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-4 bg-[#ffe66d] rounded pointer-events-none" />
-              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={sliderValue}
+                onChange={(e) => handleSliderChange(Number(e.target.value))}
+                className="w-full h-2 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#4264fb] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+              />
               {shrinkDirection && (
                 <p className="text-xs text-gray-500 mt-2 text-center">
-                  {shrinkDirection === 'left' ? '← 왼쪽으로 축소 중' : '오른쪽으로 축소 중 →'}
+                  {shrinkDirection === 'left' ? '← 왼쪽 방향' : '오른쪽 방향 →'}
                 </p>
               )}
             </div>

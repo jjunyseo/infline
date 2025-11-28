@@ -1,10 +1,6 @@
 import { create } from 'zustand';
 import { Line, UserLocation, LineCreationStep, LineCreationConfig, LineZone, SearchPin } from '@/types';
 
-// 반경 범위: 대원(20037.5km) ~ 반바퀴 원(50km)
-const EARTH_HALF_CIRCUMFERENCE = 20037.5;
-const MIN_RADIUS = 50; // 최소 반경
-
 interface LinesState {
   lines: Line[];
   userLocation: UserLocation | null;
@@ -14,6 +10,7 @@ interface LinesState {
   previewGeometry: GeoJSON.LineString | null;
   previewCenter: [number, number] | null;
   shrinkDirection: 'left' | 'right' | null;
+  offset: number; // 대원에서 얼마나 변형됐는지 (0 = 대원, 큰값 = 작은 원)
   
   addLine: (line: Line) => void;
   removeLine: (id: string) => void;
@@ -23,7 +20,7 @@ interface LinesState {
   goBack: () => void;
   setCreationMode: (mode: 'direction' | 'points') => void;
   setBearing: (bearing: number) => void;
-  setRadius: (radius: number) => void;
+  setOffset: (offset: number) => void;
   setShrinkDirection: (direction: 'left' | 'right' | null) => void;
   addSelectedPoint: (point: [number, number]) => void;
   removeSelectedPoint: (index: number) => void;
@@ -43,7 +40,7 @@ const initialCreationConfig: LineCreationConfig = {
   bearing: 0,
   selectedPoints: [],
   maxRiders: 10,
-  radius: EARTH_HALF_CIRCUMFERENCE,
+  radius: 20037.5, // 표시용 (실제로는 offset 사용)
   zones: [],
 };
 
@@ -56,6 +53,7 @@ export const useLines = create<LinesState>((set, get) => ({
   previewGeometry: null,
   previewCenter: null,
   shrinkDirection: null,
+  offset: 0, // 초기값 = 대원
 
   addLine: (line) =>
     set((state) => ({ lines: [...state.lines, line] })),
@@ -83,13 +81,14 @@ export const useLines = create<LinesState>((set, get) => ({
           previewGeometry: null,
           previewCenter: null,
           shrinkDirection: null,
+          offset: 0,
         });
         break;
       case 'customize':
         set({ 
           creationStep: creationConfig.mode === 'direction' ? 'select-direction' : 'select-points',
           shrinkDirection: null,
-          creationConfig: { ...get().creationConfig, radius: EARTH_HALF_CIRCUMFERENCE },
+          offset: 0,
         });
         break;
       case 'add-zone':
@@ -110,13 +109,8 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: { ...state.creationConfig, bearing },
     })),
 
-  setRadius: (radius) =>
-    set((state) => ({
-      creationConfig: { 
-        ...state.creationConfig, 
-        radius: Math.max(MIN_RADIUS, Math.min(radius, EARTH_HALF_CIRCUMFERENCE)) 
-      },
-    })),
+  setOffset: (offset) =>
+    set({ offset: Math.max(0, offset) }),
 
   setShrinkDirection: (direction) =>
     set({ shrinkDirection: direction }),
@@ -188,6 +182,7 @@ export const useLines = create<LinesState>((set, get) => ({
       previewGeometry: null,
       previewCenter: null,
       shrinkDirection: null,
+      offset: 0,
     }),
 
   startCreation: () =>
@@ -197,5 +192,6 @@ export const useLines = create<LinesState>((set, get) => ({
       previewGeometry: null,
       previewCenter: null,
       shrinkDirection: null,
+      offset: 0,
     }),
 }));

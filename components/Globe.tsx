@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useLines } from '@/store/useLines';
@@ -12,15 +12,13 @@ import {
   calculateDistance,
   findNearestPointOnLine,
   determineShrinkDirection,
-  EARTH_HALF_CIRCUMFERENCE,
+  offsetToDisplayRadius,
 } from '@/lib/lineGenerator';
 import { LineZone } from '@/types';
 
 interface GlobeProps {
   onMapReady?: (map: mapboxgl.Map) => void;
 }
-
-const MIN_RADIUS = 50;
 
 export default function Globe({ onMapReady }: GlobeProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -35,8 +33,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
   const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   const [isNearLine, setIsNearLine] = useState(false);
   
-  // 드래그 시작점 저장
-  const dragStartRef = useRef<{ point: [number, number]; radius: number } | null>(null);
+  const dragStartRef = useRef<{ point: [number, number] } | null>(null);
 
   const {
     lines,
@@ -47,9 +44,10 @@ export default function Globe({ onMapReady }: GlobeProps) {
     creationConfig,
     previewGeometry,
     shrinkDirection,
+    offset,
     setCreationStep,
     setBearing,
-    setRadius,
+    setOffset,
     setShrinkDirection,
     setPreviewGeometry,
     addSelectedPoint,
@@ -274,7 +272,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
     }
   }, [lines]);
 
-  // 프리뷰 라인 계산 (하나의 원만 표시)
+  // 프리뷰 라인 계산 (하나의 선만!)
   useEffect(() => {
     if (!map.current?.isStyleLoaded() || !userLocation) return;
 
@@ -290,7 +288,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
         const result = generateCircleWithDirection(
           [userLocation.lon, userLocation.lat],
           creationConfig.bearing,
-          creationConfig.radius,
+          offset,
           shrinkDirection
         );
         geometry = result.geometry;
@@ -313,7 +311,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
       }
     }
 
-    // 하나의 원만 표시
+    // 하나의 선만 표시
     if (geometry) {
       source.setData({
         type: 'FeatureCollection',
@@ -329,8 +327,8 @@ export default function Globe({ onMapReady }: GlobeProps) {
     creationStep,
     creationConfig.mode,
     creationConfig.bearing,
-    creationConfig.radius,
     creationConfig.selectedPoints,
+    offset,
     shrinkDirection,
     setPreviewGeometry,
   ]);
@@ -425,7 +423,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
         const coords = previewGeometry.coordinates as [number, number][];
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
         
-        if (nearest.distance < 200) {
+        if (nearest.distance < 300) {
           setIsNearLine(true);
           canvas.style.cursor = isDraggingRadius ? 'grabbing' : 'grab';
         } else {
@@ -433,12 +431,12 @@ export default function Globe({ onMapReady }: GlobeProps) {
           canvas.style.cursor = 'default';
         }
 
-        // 반경 드래그 중 - 연속적 업데이트
+        // 드래그 중 - 연속적 업데이트
         if (isDraggingRadius && userLocation && dragStartRef.current) {
           const currentPoint: [number, number] = [e.lngLat.lng, e.lngLat.lat];
           const origin: [number, number] = [userLocation.lon, userLocation.lat];
           
-          // 드래그 거리 계산 (시작점에서 현재점까지)
+          // 드래그 시작점에서 현재점까지의 거리
           const dragDistance = calculateDistance(dragStartRef.current.point, currentPoint);
           
           // 드래그 방향 결정 (한번만)
@@ -447,13 +445,8 @@ export default function Globe({ onMapReady }: GlobeProps) {
             setShrinkDirection(direction);
           }
           
-          // 반경 연속 계산: 드래그 거리에 비례해서 줄어듦
-          // 대원에서 시작, 드래그할수록 작아짐
-          const maxDrag = 5000; // 최대 드래그 거리 (km)
-          const ratio = Math.min(dragDistance / maxDrag, 1);
-          const newRadius = EARTH_HALF_CIRCUMFERENCE - ratio * (EARTH_HALF_CIRCUMFERENCE - MIN_RADIUS);
-          
-          setRadius(newRadius);
+          // offset = 드래그 거리 (연속적)
+          setOffset(dragDistance);
         }
       };
 
@@ -463,11 +456,10 @@ export default function Globe({ onMapReady }: GlobeProps) {
         const coords = previewGeometry.coordinates as [number, number][];
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
         
-        if (nearest.distance < 200) {
+        if (nearest.distance < 300) {
           setIsDraggingRadius(true);
           dragStartRef.current = {
             point: [e.lngLat.lng, e.lngLat.lat],
-            radius: creationConfig.radius,
           };
           map.current?.dragPan.disable();
           canvas.style.cursor = 'grabbing';
@@ -490,7 +482,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
         const coords = previewGeometry.coordinates as [number, number][];
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
         
-        if (nearest.distance < 200) {
+        if (nearest.distance < 300) {
           const newZone: LineZone = {
             id: `zone-${Date.now()}`,
             center: nearest.point,
@@ -530,7 +522,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
         const coords = previewGeometry.coordinates as [number, number][];
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
         
-        if (nearest.distance < 200) {
+        if (nearest.distance < 300) {
           setIsNearLine(true);
           canvas.style.cursor = 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'32\' viewBox=\'0 0 24 32\'%3E%3Cpath d=\'M12 0C5.37 0 0 5.37 0 12c0 9 12 20 12 20s12-11 12-20c0-6.63-5.37-12-12-12z\' fill=\'%23ff6b6b\'/%3E%3Ccircle cx=\'12\' cy=\'10\' r=\'4\' fill=\'white\'/%3E%3C/svg%3E") 12 32, crosshair';
         } else {
@@ -575,7 +567,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
         const coords = previewGeometry.coordinates as [number, number][];
         const nearest = findNearestPointOnLine([e.lngLat.lng, e.lngLat.lat], coords);
         
-        if (nearest.distance < 200) {
+        if (nearest.distance < 300) {
           const newZone: LineZone = {
             id: `zone-${Date.now()}`,
             center: nearest.point,
@@ -613,18 +605,22 @@ export default function Globe({ onMapReady }: GlobeProps) {
     creationConfig,
     previewGeometry,
     shrinkDirection,
+    offset,
     isDraggingRadius,
     isDraggingZone,
     isNearLine,
     editingZoneId,
     setBearing,
-    setRadius,
+    setOffset,
     setShrinkDirection,
     setCreationStep,
     addSelectedPoint,
     addZone,
     updateZone,
   ]);
+
+  // 표시용 반경 계산
+  const displayRadius = offsetToDisplayRadius(offset);
 
   return (
     <div className="relative w-full h-full">
@@ -650,9 +646,9 @@ export default function Globe({ onMapReady }: GlobeProps) {
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-[#1a1a24]/90 backdrop-blur-sm px-6 py-3 rounded-full border border-[#ffe66d]/50 z-10">
           <p className="text-sm text-white">
             {isDraggingRadius 
-              ? `📐 반경: ${Math.round(creationConfig.radius).toLocaleString()} km`
+              ? `📐 반경: ${Math.round(displayRadius).toLocaleString()} km`
               : isNearLine 
-                ? '✋ 드래그로 반경 조절 · 클릭으로 구역 추가' 
+                ? '✋ 드래그로 크기 조절 · 클릭으로 구역 추가' 
                 : '⚙️ 선 위로 마우스를 이동하세요'}
           </p>
         </div>
