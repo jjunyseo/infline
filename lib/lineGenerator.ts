@@ -1,67 +1,98 @@
 import * as turf from '@turf/turf';
 
-const EARTH_HALF_CIRCUMFERENCE = 20037.5; // km (지구 둘레의 절반)
-const MIN_RADIUS = 50; // 최소 반경
+const EARTH_HALF_CIRCUMFERENCE = 20037.5; // km
 
 /**
- * 대원에서 시작해서 점진적으로 작은 원으로 변형
+ * 대원의 평면을 회전시켜 원을 생성
  * 
  * - origin: 사용자 위치 (원이 항상 지나는 점)
  * - bearing: 대원의 방향
- * - offset: 대원에서 얼마나 옆으로 밀렸는지 (0 = 대원, 큰값 = 작은 원)
- * - shrinkDirection: 밀리는 방향 ('left' = bearing-90, 'right' = bearing+90)
+ * - tilt: 평면 회전 각도 (-90 ~ 0 ~ 90)
+ *   - 0: 대원 (지구 한 바퀴)
+ *   - +90: 오른쪽으로 90도 회전 → 점
+ *   - -90: 왼쪽으로 90도 회전 → 점
  */
-export function generateCircleWithDirection(
+export function generateTiltedCircle(
   origin: [number, number],
   bearing: number,
-  offset: number,
-  shrinkDirection: 'left' | 'right' | null,
+  tilt: number,
   steps: number = 200
 ): {
   geometry: GeoJSON.LineString;
   center: [number, number];
 } {
-  // offset이 0이거나 방향이 없으면 대원
-  if (!shrinkDirection || offset < 10) {
+  const absTilt = Math.abs(tilt);
+  
+  // tilt가 거의 0이면 대원
+  if (absTilt < 1) {
     return {
       geometry: generateGreatCircleLine(origin, bearing, steps),
       center: origin,
     };
   }
-
-  // 옆으로 밀 방향
-  const offsetBearing = shrinkDirection === 'right' 
+  
+  // tilt 방향 (bearing에 수직)
+  const tiltDirection = tilt > 0 
     ? (bearing + 90) % 360 
     : (bearing - 90 + 360) % 360;
-
-  // 대원의 각 점을 생성하면서 옆으로 밀기
+  
+  // tilt 강도 (0 ~ 1)
+  // 0: 대원, 1: 점
+  const tiltStrength = absTilt / 90;
+  
   const coordinates: [number, number][] = [];
   const earthCircumference = 40075;
   const stepDistance = earthCircumference / steps;
-
+  
   for (let i = 0; i <= steps; i++) {
     // 대원 위의 점
     const distance = stepDistance * i;
     const greatCirclePoint = turf.destination(origin, distance, bearing, { units: 'kilometers' });
-    const coord = greatCirclePoint.geometry.coordinates as [number, number];
+    const gcCoord = greatCirclePoint.geometry.coordinates as [number, number];
     
-    // offset 양에 따라 점을 옆으로 이동
-    // 시작점(origin)과 끝점은 고정, 중간(지구 반대편)에서 최대로 이동
-    const progress = i / steps; // 0 ~ 1
-    const actualOffset = offset * Math.sin(progress * Math.PI);
+    // 대원에서의 진행도 (0 → 1 → 0, 중간에서 최대)
+    const t = i / steps;
+    const progress = Math.sin(t * Math.PI);
     
-    if (actualOffset > 10) {
-      const newPoint = turf.destination(coord, actualOffset, offsetBearing, { units: 'kilometers' });
-      coordinates.push(newPoint.geometry.coordinates as [number, number]);
+    // === 평면 회전 효과 ===
+    // 1. 대원의 점을 tiltDirection 방향으로 밀기
+    // 2. 동시에 origin 쪽으로 수축 (점으로 수렴)
+    
+    // 밀리는 양 (중간 지점에서 최대)
+    const maxPush = 8000 * tiltStrength; // 최대 밀림
+    const pushDistance = progress * maxPush;
+    
+    // tiltDirection 방향으로 밀기
+    let coord: [number, number];
+    
+    if (pushDistance > 10) {
+      const pushedPoint = turf.destination(gcCoord, pushDistance, tiltDirection, { units: 'kilometers' });
+      coord = pushedPoint.geometry.coordinates as [number, number];
     } else {
-      coordinates.push(coord);
+      coord = gcCoord;
     }
+    
+    // 점으로 수렴하기 위해 origin 쪽으로 당기기
+    // tiltStrength가 커질수록 더 많이 당김
+    // 수렴점: origin에서 tiltDirection 방향으로 약간 떨어진 점
+    const convergenceDistance = 100 * (1 - tiltStrength); // tilt=90일 때 0
+    const convergencePoint = turf.destination(origin, convergenceDistance, tiltDirection, { units: 'kilometers' });
+    const convergence = convergencePoint.geometry.coordinates as [number, number];
+    
+    // 현재 위치에서 수렴점 쪽으로 보간
+    // tiltStrength^2를 사용해서 끝에서 급격히 수렴
+    const pullFactor = Math.pow(tiltStrength, 1.5) * progress;
+    
+    const finalLng = coord[0] + (convergence[0] - coord[0]) * pullFactor;
+    const finalLat = coord[1] + (convergence[1] - coord[1]) * pullFactor;
+    
+    coordinates.push([finalLng, finalLat]);
   }
-
-  // 원의 중심 계산 (중간 지점)
+  
+  // 중심 계산 (중간 지점)
   const midIndex = Math.floor(steps / 2);
   const center = coordinates[midIndex];
-
+  
   return {
     geometry: { type: 'LineString', coordinates },
     center,
@@ -207,33 +238,16 @@ export function findNearestPointOnLine(
 }
 
 /**
- * 드래그 방향으로부터 축소 방향 결정
+ * tilt 값에서 표시용 반경 계산
  */
-export function determineShrinkDirection(
-  origin: [number, number],
-  dragPoint: [number, number],
-  bearing: number
-): 'left' | 'right' {
-  const dragBearing = turf.bearing(origin, dragPoint);
+export function tiltToDisplayRadius(tilt: number): number {
+  const absTilt = Math.abs(tilt);
+  if (absTilt < 1) return EARTH_HALF_CIRCUMFERENCE;
   
-  let diff = dragBearing - bearing;
-  if (diff > 180) diff -= 360;
-  if (diff < -180) diff += 360;
-  
-  return diff >= 0 ? 'right' : 'left';
-}
-
-/**
- * offset 값을 "반경"처럼 표시하기 위한 변환
- * offset이 클수록 원이 작아지므로, 표시용 반경은 역수 관계
- */
-export function offsetToDisplayRadius(offset: number): number {
-  if (offset < 10) return EARTH_HALF_CIRCUMFERENCE;
-  // offset이 커질수록 표시 반경이 줄어듦
-  const maxOffset = 10000; // 최대 offset
-  const ratio = Math.min(offset / maxOffset, 1);
-  return EARTH_HALF_CIRCUMFERENCE * (1 - ratio * 0.95); // 최소 5%까지
+  // tilt가 커질수록 반경이 줄어듦
+  const tiltStrength = absTilt / 90;
+  return EARTH_HALF_CIRCUMFERENCE * (1 - tiltStrength * 0.99);
 }
 
 // 상수 export
-export { EARTH_HALF_CIRCUMFERENCE, MIN_RADIUS };
+export { EARTH_HALF_CIRCUMFERENCE };

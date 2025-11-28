@@ -9,8 +9,7 @@ interface LinesState {
   creationConfig: LineCreationConfig;
   previewGeometry: GeoJSON.LineString | null;
   previewCenter: [number, number] | null;
-  shrinkDirection: 'left' | 'right' | null;
-  offset: number; // 대원에서 얼마나 변형됐는지 (0 = 대원, 큰값 = 작은 원)
+  tilt: number; // -90 ~ 0 ~ 90 (0 = 대원)
   
   addLine: (line: Line) => void;
   removeLine: (id: string) => void;
@@ -20,8 +19,7 @@ interface LinesState {
   goBack: () => void;
   setCreationMode: (mode: 'direction' | 'points') => void;
   setBearing: (bearing: number) => void;
-  setOffset: (offset: number) => void;
-  setShrinkDirection: (direction: 'left' | 'right' | null) => void;
+  setTilt: (tilt: number) => void;
   addSelectedPoint: (point: [number, number]) => void;
   removeSelectedPoint: (index: number) => void;
   clearSelectedPoints: () => void;
@@ -40,7 +38,7 @@ const initialCreationConfig: LineCreationConfig = {
   bearing: 0,
   selectedPoints: [],
   maxRiders: 10,
-  radius: 20037.5, // 표시용 (실제로는 offset 사용)
+  radius: 20037.5,
   zones: [],
 };
 
@@ -52,8 +50,7 @@ export const useLines = create<LinesState>((set, get) => ({
   creationConfig: initialCreationConfig,
   previewGeometry: null,
   previewCenter: null,
-  shrinkDirection: null,
-  offset: 0, // 초기값 = 대원
+  tilt: 0, // 0 = 대원 (중앙)
 
   addLine: (line) =>
     set((state) => ({ lines: [...state.lines, line] })),
@@ -80,15 +77,13 @@ export const useLines = create<LinesState>((set, get) => ({
           creationConfig: { ...initialCreationConfig },
           previewGeometry: null,
           previewCenter: null,
-          shrinkDirection: null,
-          offset: 0,
+          tilt: 0,
         });
         break;
       case 'customize':
         set({ 
           creationStep: creationConfig.mode === 'direction' ? 'select-direction' : 'select-points',
-          shrinkDirection: null,
-          offset: 0,
+          tilt: 0,
         });
         break;
       case 'add-zone':
@@ -109,11 +104,8 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: { ...state.creationConfig, bearing },
     })),
 
-  setOffset: (offset) =>
-    set({ offset: Math.max(0, offset) }),
-
-  setShrinkDirection: (direction) =>
-    set({ shrinkDirection: direction }),
+  setTilt: (tilt) =>
+    set({ tilt: Math.max(-90, Math.min(90, tilt)) }),
 
   addSelectedPoint: (point) =>
     set((state) => ({
@@ -181,8 +173,7 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: initialCreationConfig,
       previewGeometry: null,
       previewCenter: null,
-      shrinkDirection: null,
-      offset: 0,
+      tilt: 0,
     }),
 
   startCreation: () =>
@@ -191,7 +182,6 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: initialCreationConfig,
       previewGeometry: null,
       previewCenter: null,
-      shrinkDirection: null,
-      offset: 0,
+      tilt: 0,
     }),
 }));
