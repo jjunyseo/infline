@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Header from '@/components/Header';
 
 export default function Home() {
   return (
@@ -9,35 +10,8 @@ export default function Home() {
       {/* 배경 원형 효과 */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-[#4264fb]/10 rounded-full blur-3xl" />
 
-      {/* 네비게이션 */}
-      <nav className="relative z-10 flex items-center justify-between px-8 py-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-[#4264fb] rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-xl">∞</span>
-          </div>
-          <span className="text-xl font-bold text-white">infline</span>
-        </div>
-        <div className="flex items-center gap-6">
-          <a
-            href="#about"
-            className="text-gray-400 hover:text-white transition-colors"
-          >
-            About
-          </a>
-          <a
-            href="#how"
-            className="text-gray-400 hover:text-white transition-colors"
-          >
-            How it works
-          </a>
-          <Link
-            href="/globe"
-            className="px-4 py-2 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg text-white hover:bg-[#2a2a3a] transition-colors"
-          >
-            Enter
-          </Link>
-        </div>
-      </nav>
+      {/* 헤더 */}
+      <Header />
 
       {/* 히어로 섹션 */}
       <section className="relative z-10 flex flex-col items-center justify-center min-h-[80vh] px-8 text-center">
@@ -60,9 +34,12 @@ export default function Home() {
           >
             지구로 들어가기
           </Link>
-          <button className="px-8 py-4 bg-[#1a1a24] border border-[#3a3a4a] text-white rounded-xl hover:bg-[#2a2a3a] transition-colors">
+          <a
+            href="#how"
+            className="px-8 py-4 bg-[#1a1a24] border border-[#3a3a4a] text-white rounded-xl hover:bg-[#2a2a3a] transition-colors"
+          >
             더 알아보기
-          </button>
+          </a>
         </div>
 
         {/* 지구 미리보기 */}
