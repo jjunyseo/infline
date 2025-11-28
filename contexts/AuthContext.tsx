@@ -18,11 +18,12 @@ import {
   updateProfile,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, isFirebaseConfigured } from '@/lib/firebase';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  isConfigured: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
@@ -37,17 +38,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 인증 상태 변화 감지
   useEffect(() => {
+    // Firebase가 설정되지 않은 경우
+    if (!isFirebaseConfigured || !auth) {
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       setLoading(false);
 
       // 사용자 문서 업데이트 (마지막 로그인 시간)
-      if (user) {
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        
-        if (userSnap.exists()) {
-          await setDoc(userRef, { lastLoginAt: serverTimestamp() }, { merge: true });
+      if (user && db) {
+        try {
+          const userRef = doc(db, 'users', user.uid);
+          const userSnap = await getDoc(userRef);
+
+          if (userSnap.exists()) {
+            await setDoc(userRef, { lastLoginAt: serverTimestamp() }, { merge: true });
+          }
+        } catch (error) {
+          console.warn('Failed to update user document:', error);
         }
       }
     });
@@ -57,11 +68,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 이메일/비밀번호 로그인
   const signIn = async (email: string, password: string) => {
+    if (!auth) throw new Error('Firebase가 설정되지 않았습니다.');
     await signInWithEmailAndPassword(auth, email, password);
   };
 
   // 이메일/비밀번호 회원가입
   const signUp = async (email: string, password: string, displayName: string) => {
+    if (!auth || !db) throw new Error('Firebase가 설정되지 않았습니다.');
+
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
@@ -81,6 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Google 로그인
   const signInWithGoogle = async () => {
+    if (!auth || !db) throw new Error('Firebase가 설정되지 않았습니다.');
+
     const provider = new GoogleAuthProvider();
     const userCredential = await signInWithPopup(auth, provider);
     const user = userCredential.user;
@@ -105,6 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 로그아웃
   const signOut = async () => {
+    if (!auth) throw new Error('Firebase가 설정되지 않았습니다.');
     await firebaseSignOut(auth);
   };
 
@@ -113,6 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         loading,
+        isConfigured: isFirebaseConfigured,
         signIn,
         signUp,
         signInWithGoogle,
@@ -131,4 +149,3 @@ export function useAuth() {
   }
   return context;
 }
-

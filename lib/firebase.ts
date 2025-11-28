@@ -12,21 +12,34 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Initialize Firebase (싱글톤 패턴)
-let app: FirebaseApp;
-let auth: Auth;
-let db: Firestore;
-let storage: FirebaseStorage;
+// Firebase가 설정되었는지 확인
+export const isFirebaseConfigured = Boolean(
+  firebaseConfig.apiKey && 
+  firebaseConfig.apiKey !== 'undefined' &&
+  firebaseConfig.projectId &&
+  firebaseConfig.projectId !== 'undefined'
+);
 
-if (getApps().length === 0) {
-  app = initializeApp(firebaseConfig);
-} else {
-  app = getApps()[0];
+// Initialize Firebase (싱글톤 패턴)
+let app: FirebaseApp | null = null;
+let auth: Auth | null = null;
+let db: Firestore | null = null;
+let storage: FirebaseStorage | null = null;
+
+if (isFirebaseConfigured) {
+  try {
+    if (getApps().length === 0) {
+      app = initializeApp(firebaseConfig);
+    } else {
+      app = getApps()[0];
+    }
+
+    auth = getAuth(app);
+    db = getFirestore(app);
+    storage = getStorage(app);
+  } catch (error) {
+    console.warn('Firebase initialization failed:', error);
+  }
 }
 
-auth = getAuth(app);
-db = getFirestore(app);
-storage = getStorage(app);
-
 export { app, auth, db, storage };
-

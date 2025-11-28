@@ -15,6 +15,10 @@ interface LinesState {
   creationStep: LineCreationStep;
   creationConfig: LineCreationConfig;
   
+  // 프리뷰 (별도 관리 - 무한 루프 방지)
+  previewGeometry: GeoJSON.LineString | null;
+  previewCenter: [number, number] | null;
+  
   // Actions - 선 관리
   addLine: (line: Line) => void;
   removeLine: (id: string) => void;
@@ -37,6 +41,8 @@ interface LinesState {
   removeSelectedPoint: (index: number) => void;
   clearSelectedPoints: () => void;
   setMaxRiders: (count: number) => void;
+  
+  // Actions - 프리뷰 (별도)
   setPreviewGeometry: (geometry: GeoJSON.LineString | null, center: [number, number] | null) => void;
   
   // Actions - 구역 설정
@@ -59,8 +65,6 @@ const initialCreationConfig: LineCreationConfig = {
   maxRiders: 10,
   radius: EARTH_HALF_CIRCUMFERENCE,
   zones: [],
-  previewGeometry: null,
-  previewCenter: null,
 };
 
 export const useLines = create<LinesState>((set, get) => ({
@@ -69,6 +73,8 @@ export const useLines = create<LinesState>((set, get) => ({
   searchPin: null,
   creationStep: 'select-mode',
   creationConfig: initialCreationConfig,
+  previewGeometry: null,
+  previewCenter: null,
 
   // 선 관리
   addLine: (line) =>
@@ -96,7 +102,9 @@ export const useLines = create<LinesState>((set, get) => ({
       case 'select-points':
         set({ 
           creationStep: 'select-mode',
-          creationConfig: { ...initialCreationConfig }
+          creationConfig: { ...initialCreationConfig },
+          previewGeometry: null,
+          previewCenter: null,
         });
         break;
       case 'customize':
@@ -155,14 +163,9 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: { ...state.creationConfig, maxRiders: count },
     })),
 
+  // 프리뷰 (별도 상태로 관리)
   setPreviewGeometry: (geometry, center) =>
-    set((state) => ({
-      creationConfig: { 
-        ...state.creationConfig, 
-        previewGeometry: geometry,
-        previewCenter: center,
-      },
-    })),
+    set({ previewGeometry: geometry, previewCenter: center }),
 
   // 구역 설정
   addZone: (zone) =>
@@ -201,11 +204,15 @@ export const useLines = create<LinesState>((set, get) => ({
     set({
       creationStep: 'select-mode',
       creationConfig: initialCreationConfig,
+      previewGeometry: null,
+      previewCenter: null,
     }),
 
   startCreation: () =>
     set({
       creationStep: 'select-mode',
       creationConfig: initialCreationConfig,
+      previewGeometry: null,
+      previewCenter: null,
     }),
 }));

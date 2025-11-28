@@ -66,10 +66,6 @@ export interface LineCreationConfig {
   maxRiders: number;
   radius: number; // km (기본값: 지구 둘레 절반)
   zones: LineZone[];
-  
-  // 프리뷰 선 geometry
-  previewGeometry: GeoJSON.LineString | null;
-  previewCenter: [number, number] | null;
 }
 
 export type SidebarTab = 'create' | 'lines' | 'settings';

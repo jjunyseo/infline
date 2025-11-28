@@ -9,6 +9,8 @@ export default function LineCreator() {
     creationStep,
     creationConfig,
     userLocation,
+    previewGeometry,
+    previewCenter,
     setCreationStep,
     setCreationMode,
     setMaxRiders,
@@ -31,18 +33,18 @@ export default function LineCreator() {
   };
 
   const handleSaveLine = () => {
-    if (!userLocation || !creationConfig.previewGeometry) return;
+    if (!userLocation || !previewGeometry) return;
 
     const newLine: Line = {
       id: `line-${Date.now()}`,
       creatorId: 'user-1',
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      geometry: creationConfig.previewGeometry,
+      geometry: previewGeometry,
       color: getRandomLineColor(),
       maxRiders: creationConfig.maxRiders,
       riderCount: 0,
-      center: creationConfig.previewCenter || [userLocation.lon, userLocation.lat],
+      center: previewCenter || [userLocation.lon, userLocation.lat],
       radius: creationConfig.radius,
       bearing: creationConfig.bearing,
       zones: [...creationConfig.zones],
@@ -346,7 +348,7 @@ export default function LineCreator() {
         <div className="pt-4 space-y-2">
           <button
             onClick={handleSaveLine}
-            disabled={!creationConfig.previewGeometry}
+            disabled={!previewGeometry}
             className="w-full py-3 bg-[#4264fb] hover:bg-[#5a7bfc] text-white font-semibold 
                        rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -389,7 +391,7 @@ export default function LineCreator() {
           </p>
           <p className="text-xs text-gray-500">
             클릭한 위치를 중심으로 구역이 생성됩니다.
-            <br />드래그하여 반경을 조절할 수 있습니다. (최대 5km)
+            <br />반경은 최대 5km입니다.
           </p>
         </div>
       </div>
