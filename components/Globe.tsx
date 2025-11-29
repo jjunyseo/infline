@@ -113,6 +113,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
       zoom: 2,
       center: [127, 37],
       pitch: 0,
+      renderWorldCopies: false,
     });
 
     map.current.on('load', () => {
