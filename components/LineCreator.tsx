@@ -1,8 +1,15 @@
 'use client';
 
 import { useLines } from '@/store/useLines';
-import { Line } from '@/types';
+import { Line, Zone, CreationScope } from '@/types';
 import { getRandomLineColor, offsetToDisplayRadius } from '@/lib/lineGenerator';
+
+const SCOPE_INFO: Record<CreationScope, { icon: string; label: string; description: string }> = {
+  nearby: { icon: '📍', label: '근처', description: '반경 1km 내 주변 지역' },
+  city: { icon: '🏙️', label: '도시', description: '내가 있는 도시 전체' },
+  country: { icon: '🏳️', label: '국가', description: '내가 있는 국가 전체' },
+  globe: { icon: '🌍', label: '지구', description: '지구 전체를 대상으로' },
+};
 
 export default function LineCreator() {
   const {
@@ -13,40 +20,54 @@ export default function LineCreator() {
     previewCenter,
     offset,
     setCreationStep,
-    setCreationMode,
+    setScope,
+    setCreationType,
+    setLineMode,
     setMaxRiders,
     setOffset,
     goBack,
     resetCreation,
     removeSelectedPoint,
-    removeZone,
-    updateZone,
+    removeLineZone,
+    updateLineZone,
+    removeCreationZone,
+    updateCreationZone,
     addLine,
+    addStandaloneZone,
   } = useLines();
 
-  const handleStartDirectionMode = () => {
-    setCreationMode('direction');
-    setCreationStep('select-direction');
-  };
-
-  const handleStartPointsMode = () => {
-    setCreationMode('points');
-    setCreationStep('select-points');
-  };
-
   // 슬라이더 변경 시
-  // 슬라이더: 0 ~ 100 (50 = 중앙 = 대원)
-  // offset: -1 ~ 0 ~ +1
   const handleSliderChange = (value: number) => {
-    const newOffset = (value - 50) / 50; // -1 ~ 0 ~ +1
+    const newOffset = (value - 50) / 50;
     setOffset(newOffset);
   };
 
-  // offset에서 슬라이더 값으로
-  const sliderValue = 50 + offset * 50; // 0 ~ 100
-
+  const sliderValue = 50 + offset * 50;
   const displayRadius = offsetToDisplayRadius(offset);
 
+  // 스코프 선택
+  const handleSelectScope = (scope: CreationScope) => {
+    setScope(scope);
+    setCreationStep('select-type');
+  };
+
+  // 유형 선택 (선/구역)
+  const handleSelectType = (type: 'line' | 'zone') => {
+    setCreationType(type);
+    if (type === 'line') {
+      setCreationStep('select-mode');
+    } else {
+      setCreationStep('zone-place');
+    }
+  };
+
+  // 선 만들기 모드 선택
+  const handleSelectLineMode = (mode: 'direction' | 'points') => {
+    setLineMode(mode);
+    setCreationStep(mode === 'direction' ? 'select-direction' : 'select-points');
+  };
+
+  // 선 저장
   const handleSaveLine = () => {
     if (!userLocation || !previewGeometry) return;
 
@@ -62,22 +83,134 @@ export default function LineCreator() {
       center: previewCenter || [userLocation.lon, userLocation.lat],
       radius: displayRadius,
       bearing: creationConfig.bearing,
-      zones: [...creationConfig.zones],
+      zones: [...creationConfig.lineZones],
     };
 
     addLine(newLine);
     resetCreation();
   };
 
+  // 구역 저장
+  const handleSaveZones = () => {
+    if (!userLocation) return;
+
+    creationConfig.zones.forEach((zone) => {
+      const newZone: Zone = {
+        ...zone,
+        creatorId: 'user-1',
+        createdAt: new Date().toISOString(),
+      };
+      addStandaloneZone(newZone);
+    });
+
+    resetCreation();
+  };
+
+  // 1. 스코프 선택 화면
+  if (creationStep === 'select-scope') {
+    return (
+      <div className="p-4 space-y-4">
+        <h3 className="text-sm font-semibold text-gray-400 mb-3">어디서 시작할까요?</h3>
+        <div className="grid grid-cols-2 gap-2">
+          {(Object.keys(SCOPE_INFO) as CreationScope[]).map((scope) => {
+            const info = SCOPE_INFO[scope];
+            return (
+              <button
+                key={scope}
+                onClick={() => handleSelectScope(scope)}
+                disabled={!userLocation}
+                className="p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl hover:border-[#4264fb]/50 transition-all text-center group disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div className="text-3xl mb-2">{info.icon}</div>
+                <h4 className="text-white font-medium text-sm">{info.label}</h4>
+                <p className="text-xs text-gray-500 mt-1">{info.description}</p>
+              </button>
+            );
+          })}
+        </div>
+        {!userLocation && (
+          <p className="text-xs text-yellow-500 text-center">⚠️ 위치 정보를 가져오는 중...</p>
+        )}
+      </div>
+    );
+  }
+
+  // 2. 유형 선택 화면 (선/구역)
+  if (creationStep === 'select-type') {
+    const scopeInfo = SCOPE_INFO[creationConfig.scope];
+    return (
+      <div className="p-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <button onClick={goBack} className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div className="flex items-center gap-2 text-[#4264fb]">
+            <span className="text-xl">{scopeInfo.icon}</span>
+            <span className="font-medium">{scopeInfo.label}</span>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold text-gray-400">무엇을 만들까요?</h3>
+        
+        <div className="space-y-2">
+          <button
+            onClick={() => handleSelectType('line')}
+            className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl hover:border-[#4264fb]/50 transition-all text-left group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-[#4264fb]/20 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-[#4264fb]/30 transition-colors">
+                <span className="text-xl">〰️</span>
+              </div>
+              <div>
+                <h4 className="text-white font-medium mb-1">선 만들기</h4>
+                <p className="text-xs text-gray-500">지구를 가로지르는 대원 또는 원을 만듭니다.</p>
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => handleSelectType('zone')}
+            className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl hover:border-[#00d4aa]/50 transition-all text-left group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-[#00d4aa]/20 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-[#00d4aa]/30 transition-colors">
+                <span className="text-xl">⭕</span>
+              </div>
+              <div>
+                <h4 className="text-white font-medium mb-1">구역 만들기</h4>
+                <p className="text-xs text-gray-500">특정 위치에 원형 구역을 만듭니다.</p>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. 선 만들기 - 모드 선택
   if (creationStep === 'select-mode') {
     return (
       <div className="p-4 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-400 mb-3">생성 방식 선택</h3>
+        <div className="flex items-center gap-2">
+          <button onClick={goBack} className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div className="flex items-center gap-2 text-[#4264fb]">
+            <span className="text-xl">〰️</span>
+            <span className="font-medium">선 만들기</span>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold text-gray-400">어떻게 만들까요?</h3>
+        
         <div className="space-y-2">
           <button
-            onClick={handleStartDirectionMode}
-            disabled={!userLocation}
-            className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl hover:border-[#4264fb]/50 transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => handleSelectLineMode('direction')}
+            className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl hover:border-[#4264fb]/50 transition-all text-left group"
           >
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 bg-[#4264fb]/20 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-[#4264fb]/30 transition-colors">
@@ -91,9 +224,8 @@ export default function LineCreator() {
           </button>
 
           <button
-            onClick={handleStartPointsMode}
-            disabled={!userLocation}
-            className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl hover:border-[#00d4aa]/50 transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => handleSelectLineMode('points')}
+            className="w-full p-4 bg-[#1a1a24] border border-[#3a3a4a] rounded-xl hover:border-[#00d4aa]/50 transition-all text-left group"
           >
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 bg-[#00d4aa]/20 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-[#00d4aa]/30 transition-colors">
@@ -106,11 +238,11 @@ export default function LineCreator() {
             </div>
           </button>
         </div>
-        {!userLocation && <p className="text-xs text-yellow-500 text-center">⚠️ 위치 정보를 가져오는 중...</p>}
       </div>
     );
   }
 
+  // 4a. 방향 선택
   if (creationStep === 'select-direction') {
     return (
       <div className="p-4 space-y-4">
@@ -126,13 +258,14 @@ export default function LineCreator() {
           </div>
         </div>
         <div className="p-4 bg-[#1a1a24] rounded-xl border border-[#3a3a4a]">
-          <p className="text-sm text-gray-300 mb-2">지구에서 선이 나아갈 방향을 클릭하세요.</p>
+          <p className="text-sm text-gray-300 mb-2">지도에서 선이 나아갈 방향을 클릭하세요.</p>
           <p className="text-xs text-gray-500">클릭하면 다음 단계로 이동합니다.</p>
         </div>
       </div>
     );
   }
 
+  // 4b. 위치 선택
   if (creationStep === 'select-points') {
     return (
       <div className="p-4 space-y-4">
@@ -148,7 +281,7 @@ export default function LineCreator() {
           </div>
         </div>
         <div className="p-4 bg-[#1a1a24] rounded-xl border border-[#3a3a4a]">
-          <p className="text-sm text-gray-300 mb-2">지구에서 2개의 위치를 선택하세요.</p>
+          <p className="text-sm text-gray-300 mb-2">지도에서 2개의 위치를 선택하세요.</p>
           <p className="text-xs text-gray-500">내 위치 + 선택한 2점이 하나의 원 위에 놓입니다.</p>
         </div>
         <div className="space-y-2">
@@ -186,7 +319,8 @@ export default function LineCreator() {
     );
   }
 
-  if (creationStep === 'customize') {
+  // 5. 커스터마이징 (선)
+  if (creationStep === 'customize' && creationConfig.type === 'line') {
     return (
       <div className="p-4 space-y-4">
         <div className="flex items-center gap-2">
@@ -209,7 +343,7 @@ export default function LineCreator() {
         </div>
 
         <div className="space-y-3">
-          {creationConfig.mode === 'direction' && (
+          {creationConfig.lineMode === 'direction' && (
             <div className="p-3 bg-[#1a1a24] rounded-lg border border-[#3a3a4a]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm text-gray-400">원 크기</span>
@@ -231,14 +365,8 @@ export default function LineCreator() {
                   onChange={(e) => handleSliderChange(Number(e.target.value))}
                   className="w-full h-2 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-[#4264fb] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                 />
-                {/* 중앙 표시 */}
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-4 bg-[#ffe66d] rounded pointer-events-none" />
               </div>
-              {Math.abs(offset) >= 0.02 && (
-                <div className="text-xs text-gray-500 mt-2 text-center">
-                  {offset > 0 ? 'N 반구 방향 (오른쪽)' : 'S 반구 방향 (왼쪽)'}
-                </div>
-              )}
             </div>
           )}
 
@@ -263,17 +391,17 @@ export default function LineCreator() {
             <h4 className="text-xs font-medium text-gray-400">탑승 구역</h4>
             <button onClick={() => setCreationStep('add-zone')} className="text-xs text-[#ff6b6b] hover:text-[#ff8787] transition-colors">+ 구역 추가</button>
           </div>
-          {creationConfig.zones.length === 0 ? (
+          {creationConfig.lineZones.length === 0 ? (
             <p className="text-xs text-gray-600 p-3 bg-[#1a1a24] rounded-lg border border-dashed border-[#3a3a4a]">구역이 없으면 선 전체에서 탑승 가능합니다.</p>
           ) : (
-            creationConfig.zones.map((zone, index) => (
+            creationConfig.lineZones.map((zone, index) => (
               <div key={zone.id} className="p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-6 h-6 bg-[#ff6b6b] rounded-full flex items-center justify-center">
                     <span className="text-white text-xs">{index + 1}</span>
                   </div>
                   <span className="text-sm text-white flex-1">구역 {index + 1}</span>
-                  <button onClick={() => removeZone(zone.id)} className="text-gray-500 hover:text-red-400 transition-colors">
+                  <button onClick={() => removeLineZone(zone.id)} className="text-gray-500 hover:text-red-400 transition-colors">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
@@ -286,7 +414,7 @@ export default function LineCreator() {
                     min="1"
                     max="500"
                     value={zone.radius}
-                    onChange={(e) => updateZone(zone.id, { radius: Number(e.target.value) })}
+                    onChange={(e) => updateLineZone(zone.id, { radius: Number(e.target.value) })}
                     className="flex-1 h-1.5 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#ff6b6b] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
                   />
                   <span className="text-xs text-white w-16 text-right">{Math.round(zone.radius)} km</span>
@@ -304,6 +432,7 @@ export default function LineCreator() {
     );
   }
 
+  // 구역 추가 모드 (선에 구역 추가)
   if (creationStep === 'add-zone') {
     return (
       <div className="p-4 space-y-4">
@@ -323,6 +452,73 @@ export default function LineCreator() {
           <p className="text-xs text-gray-500">선에 가까이 가면 커서가 바뀝니다.</p>
         </div>
         <button onClick={goBack} className="w-full py-3 bg-[#2a2a3a] hover:bg-[#3a3a4a] text-gray-300 font-medium rounded-lg transition-colors">뒤로</button>
+      </div>
+    );
+  }
+
+  // 구역 만들기 - 위치 선택
+  if (creationStep === 'zone-place') {
+    return (
+      <div className="p-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <button onClick={goBack} className="p-2 text-gray-400 hover:text-white hover:bg-[#2a2a3a] rounded-lg transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div className="flex items-center gap-2 text-[#00d4aa]">
+            <span className="text-xl">⭕</span>
+            <span className="font-medium">구역 만들기</span>
+          </div>
+        </div>
+        
+        <div className="p-4 bg-[#1a1a24] rounded-xl border border-[#3a3a4a]">
+          <p className="text-sm text-gray-300 mb-2">지도에서 구역을 만들 위치를 클릭하세요.</p>
+          <p className="text-xs text-gray-500">여러 개의 구역을 만들 수 있습니다.</p>
+        </div>
+
+        <div className="space-y-2">
+          <h4 className="text-xs font-medium text-gray-400">생성된 구역 ({creationConfig.zones.length}개)</h4>
+          {creationConfig.zones.length === 0 ? (
+            <p className="text-xs text-gray-600 p-3 bg-[#1a1a24] rounded-lg border border-dashed border-[#3a3a4a]">아직 구역이 없습니다. 지도를 클릭하세요.</p>
+          ) : (
+            creationConfig.zones.map((zone, index) => (
+              <div key={zone.id} className="p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ backgroundColor: zone.color }}>
+                    <span className="text-white text-xs">{index + 1}</span>
+                  </div>
+                  <span className="text-sm text-white flex-1">구역 {index + 1}</span>
+                  <button onClick={() => removeCreationZone(zone.id)} className="text-gray-500 hover:text-red-400 transition-colors">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">반경</span>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="50"
+                    step="0.1"
+                    value={zone.radius}
+                    onChange={(e) => updateCreationZone(zone.id, { radius: Number(e.target.value) })}
+                    className="flex-1 h-1.5 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#00d4aa] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+                  />
+                  <span className="text-xs text-white w-16 text-right">{zone.radius.toFixed(1)} km</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {creationConfig.zones.length > 0 && (
+          <div className="pt-4 space-y-2">
+            <button onClick={handleSaveZones} className="w-full py-3 bg-[#00d4aa] hover:bg-[#00e4bb] text-white font-semibold rounded-lg transition-colors">✓ 구역 저장하기</button>
+            <button onClick={resetCreation} className="w-full py-3 bg-[#2a2a3a] hover:bg-[#3a3a4a] text-gray-300 font-medium rounded-lg transition-colors">취소</button>
+          </div>
+        )}
       </div>
     );
   }
