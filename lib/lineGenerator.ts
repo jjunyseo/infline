@@ -78,6 +78,15 @@ function rotateVectorAroundAxis(vector: Vector3, axis: Vector3, angle: number): 
   return normalize(add(add(term1, term2), term3));
 }
 
+/**
+ * Normalizes longitude to the [-180, 180] range
+ */
+function normalizeLon(lon: number): number {
+  while (lon > 180) lon -= 360;
+  while (lon < -180) lon += 360;
+  return lon;
+}
+
 function buildCircleGeometry({
   normal,
   pointOnPlane,
@@ -108,7 +117,12 @@ function buildCircleGeometry({
     v = normalize(cross(unitNormal, [1, 0, 0]));
   }
 
-  const coordinates: [number, number][] = [];
+  // Determine the enforced start coordinate
+  const enforcedStart = startCoordinate ?? vectorToLonLat(pointOnPlane);
+  const normalizedStart: [number, number] = [normalizeLon(enforcedStart[0]), enforcedStart[1]];
+
+  // First, generate all raw coordinates
+  const rawCoords: [number, number][] = [];
   for (let i = 0; i <= clampedSteps; i++) {
     const angle = (2 * Math.PI * i) / clampedSteps;
     let pointVec = add(
@@ -116,12 +130,51 @@ function buildCircleGeometry({
       add(scale(u, radiusFactor * Math.cos(angle)), scale(v, radiusFactor * Math.sin(angle)))
     );
     pointVec = normalize(pointVec);
-    coordinates.push(vectorToLonLat(pointVec));
+    const [lon, lat] = vectorToLonLat(pointVec);
+    rawCoords.push([normalizeLon(lon), lat]);
   }
 
-  const enforcedStart = startCoordinate ?? vectorToLonLat(pointOnPlane);
-  coordinates[0] = enforcedStart;
-  coordinates[coordinates.length - 1] = enforcedStart;
+  // Find the index of the point closest to the enforced start
+  let minDist = Infinity;
+  let startIdx = 0;
+  for (let i = 0; i < rawCoords.length - 1; i++) {
+    const lonDiff = Math.abs(rawCoords[i][0] - normalizedStart[0]);
+    const latDiff = Math.abs(rawCoords[i][1] - normalizedStart[1]);
+    const adjustedLonDiff = Math.min(lonDiff, 360 - lonDiff);
+    const dist = Math.sqrt(adjustedLonDiff * adjustedLonDiff + latDiff * latDiff);
+    if (dist < minDist) {
+      minDist = dist;
+      startIdx = i;
+    }
+  }
+
+  // Reorder coordinates to start from the closest point to enforcedStart
+  const reorderedCoords: [number, number][] = [
+    ...rawCoords.slice(startIdx, rawCoords.length - 1), // Skip the last duplicate point
+    ...rawCoords.slice(0, startIdx),
+  ];
+  
+  // Close the loop
+  reorderedCoords.push([...reorderedCoords[0]] as [number, number]);
+  
+  // Enforce exact start/end coordinates
+  reorderedCoords[0] = normalizedStart;
+  reorderedCoords[reorderedCoords.length - 1] = normalizedStart;
+
+  // Now fix antimeridian crossings by making longitude continuous
+  const coordinates: [number, number][] = [reorderedCoords[0]];
+  for (let i = 1; i < reorderedCoords.length; i++) {
+    const prev = coordinates[coordinates.length - 1];
+    const curr = reorderedCoords[i];
+    
+    // Calculate shortest longitude difference
+    let lonDiff = curr[0] - prev[0];
+    if (lonDiff > 180) lonDiff -= 360;
+    if (lonDiff < -180) lonDiff += 360;
+    
+    // Use continuous longitude (may be outside [-180, 180])
+    coordinates.push([prev[0] + lonDiff, curr[1]]);
+  }
 
   return {
     geometry: { type: 'LineString', coordinates },
