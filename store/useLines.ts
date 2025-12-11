@@ -139,19 +139,23 @@ export const useLines = create<LinesState>((set, get) => ({
         break;
       case 'select-direction':
       case 'select-points':
-        set({ 
+        // 뒤로 갈 때 미리보기 및 선에 추가된 구역 클리어
+        set((state) => ({ 
           creationStep: 'select-mode',
           previewGeometry: null,
           previewCenter: null,
           offset: 0,
-        });
+          creationConfig: { ...state.creationConfig, lineZones: [], selectedPoints: [] },
+        }));
         break;
       case 'customize':
         if (creationConfig.type === 'line') {
-          set({ 
+          // 뒤로 갈 때 선에 추가된 구역 클리어
+          set((state) => ({ 
             creationStep: creationConfig.lineMode === 'direction' ? 'select-direction' : 'select-points',
             offset: 0,
-          });
+            creationConfig: { ...state.creationConfig, lineZones: [] },
+          }));
         } else {
           set({ creationStep: 'zone-place' });
         }
@@ -160,7 +164,11 @@ export const useLines = create<LinesState>((set, get) => ({
         set({ creationStep: 'customize' });
         break;
       case 'zone-place':
-        set({ creationStep: 'select-type' });
+        // 뒤로 갈 때 생성 중인 구역 클리어
+        set((state) => ({ 
+          creationStep: 'select-type',
+          creationConfig: { ...state.creationConfig, zones: [] },
+        }));
         break;
       case 'zone-customize':
         set({ creationStep: 'zone-place' });
@@ -277,11 +285,16 @@ export const useLines = create<LinesState>((set, get) => ({
       creationConfig: { ...state.creationConfig, zones: [] },
     })),
 
-  // Reset
+  // Reset - 새 배열/객체를 생성하여 React가 변경을 감지하도록 함
   resetCreation: () =>
     set({
       creationStep: 'select-scope',
-      creationConfig: initialCreationConfig,
+      creationConfig: {
+        ...initialCreationConfig,
+        selectedPoints: [],
+        lineZones: [],
+        zones: [],
+      },
       previewGeometry: null,
       previewCenter: null,
       offset: 0,
@@ -290,7 +303,12 @@ export const useLines = create<LinesState>((set, get) => ({
   startCreation: () =>
     set({
       creationStep: 'select-scope',
-      creationConfig: initialCreationConfig,
+      creationConfig: {
+        ...initialCreationConfig,
+        selectedPoints: [],
+        lineZones: [],
+        zones: [],
+      },
       previewGeometry: null,
       previewCenter: null,
       offset: 0,

@@ -482,34 +482,47 @@ export default function LineCreator() {
           {creationConfig.zones.length === 0 ? (
             <p className="text-xs text-gray-600 p-3 bg-[#1a1a24] rounded-lg border border-dashed border-[#3a3a4a]">아직 구역이 없습니다. 지도를 클릭하세요.</p>
           ) : (
-            creationConfig.zones.map((zone, index) => (
-              <div key={zone.id} className="p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ backgroundColor: zone.color }}>
-                    <span className="text-white text-xs">{index + 1}</span>
+            creationConfig.zones.map((zone, index) => {
+              // 근처 스코프: 10m ~ 1km, 그 외: 0.1km ~ 50km
+              const isNearby = creationConfig.scope === 'nearby';
+              const minRadius = isNearby ? 0.01 : 0.1;
+              const maxRadius = isNearby ? 1 : 50;
+              const stepRadius = isNearby ? 0.01 : 0.1;
+              
+              // 반경 표시 (미터 또는 킬로미터)
+              const displayRadius = zone.radius < 1 
+                ? `${Math.round(zone.radius * 1000)} m` 
+                : `${zone.radius.toFixed(1)} km`;
+              
+              return (
+                <div key={zone.id} className="p-3 bg-[#1a1a24] border border-[#3a3a4a] rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ backgroundColor: zone.color }}>
+                      <span className="text-white text-xs">{index + 1}</span>
+                    </div>
+                    <span className="text-sm text-white flex-1">구역 {index + 1}</span>
+                    <button onClick={() => removeCreationZone(zone.id)} className="text-gray-500 hover:text-red-400 transition-colors">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   </div>
-                  <span className="text-sm text-white flex-1">구역 {index + 1}</span>
-                  <button onClick={() => removeCreationZone(zone.id)} className="text-gray-500 hover:text-red-400 transition-colors">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500">반경</span>
+                    <input
+                      type="range"
+                      min={minRadius}
+                      max={maxRadius}
+                      step={stepRadius}
+                      value={Math.min(Math.max(zone.radius, minRadius), maxRadius)}
+                      onChange={(e) => updateCreationZone(zone.id, { radius: Number(e.target.value) })}
+                      className="flex-1 h-1.5 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#00d4aa] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+                    />
+                    <span className="text-xs text-white w-16 text-right">{displayRadius}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">반경</span>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="50"
-                    step="0.1"
-                    value={zone.radius}
-                    onChange={(e) => updateCreationZone(zone.id, { radius: Number(e.target.value) })}
-                    className="flex-1 h-1.5 bg-[#2a2a3a] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[#00d4aa] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-                  />
-                  <span className="text-xs text-white w-16 text-right">{zone.radius.toFixed(1)} km</span>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 

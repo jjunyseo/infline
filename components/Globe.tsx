@@ -430,19 +430,27 @@ export default function Globe({ onMapReady }: GlobeProps) {
     }
   }, [lines]);
 
-  // 프리뷰 라인 계산
+  // 프리뷰 라인 계산 - 생성 단계에서만 표시
   useEffect(() => {
     if (!map.current?.isStyleLoaded() || !userLocation) return;
 
     const source = map.current.getSource('preview-line') as mapboxgl.GeoJSONSource;
     if (!source) return;
 
+    // 선 생성 관련 단계가 아니면 미리보기 제거
+    const lineCreationSteps = ['select-direction', 'select-points', 'customize', 'add-zone'];
+    if (!lineCreationSteps.includes(creationStep) || creationConfig.type !== 'line') {
+      source.setData({ type: 'FeatureCollection', features: [] });
+      setPreviewGeometry(null, null);
+      return;
+    }
+
     let geometry: GeoJSON.LineString | null = null;
     let center: [number, number] | null = null;
 
     // 방향 모드
     if (creationConfig.lineMode === 'direction') {
-      if (creationStep === 'select-direction' || creationStep === 'customize') {
+      if (creationStep === 'select-direction' || creationStep === 'customize' || creationStep === 'add-zone') {
         const result = generateCircleThroughPoint(
           [userLocation.lon, userLocation.lat],
           creationConfig.bearing,
@@ -454,7 +462,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
     }
     // 위치 모드
     else if (creationConfig.lineMode === 'points') {
-      if ((creationStep === 'select-points' || creationStep === 'customize') && 
+      if ((creationStep === 'select-points' || creationStep === 'customize' || creationStep === 'add-zone') && 
           creationConfig.selectedPoints.length === 2) {
         const result = generateCircleFromThreePoints(
           [userLocation.lon, userLocation.lat],
@@ -485,6 +493,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
   }, [
     userLocation,
     creationStep,
+    creationConfig.type,
     creationConfig.lineMode,
     creationConfig.bearing,
     creationConfig.selectedPoints,
@@ -492,7 +501,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
     setPreviewGeometry,
   ]);
 
-  // 구역 표시 업데이트 (선에 붙는 구역)
+  // 구역 표시 업데이트 (선에 붙는 구역) - 저장된 것만 표시, 생성 중인 것은 해당 단계에서만
   useEffect(() => {
     if (!map.current?.isStyleLoaded()) return;
 
@@ -501,7 +510,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
 
     const zoneFeatures: GeoJSON.Feature[] = [];
 
-    // 저장된 선들의 구역
+    // 저장된 선들의 구역만 표시
     lines.forEach((line) => {
       line.zones.forEach((zone) => {
         zoneFeatures.push({
@@ -512,8 +521,8 @@ export default function Globe({ onMapReady }: GlobeProps) {
       });
     });
 
-    // 생성 중인 선의 구역
-    if (creationStep === 'customize' || creationStep === 'add-zone') {
+    // 생성 중인 선의 구역 (customize, add-zone 단계에서만 미리보기)
+    if ((creationStep === 'customize' || creationStep === 'add-zone') && creationConfig.type === 'line') {
       creationConfig.lineZones.forEach((zone) => {
         zoneFeatures.push({
           type: 'Feature',
@@ -524,9 +533,9 @@ export default function Globe({ onMapReady }: GlobeProps) {
     }
 
     source.setData({ type: 'FeatureCollection', features: zoneFeatures });
-  }, [lines, creationStep, creationConfig.lineZones]);
+  }, [lines, creationStep, creationConfig.type, creationConfig.lineZones]);
 
-  // 독립 구역 표시 업데이트
+  // 독립 구역 표시 업데이트 - 저장된 것만 표시, 생성 중인 것은 zone-place에서만
   useEffect(() => {
     if (!map.current?.isStyleLoaded()) return;
 
@@ -535,7 +544,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
 
     const zoneFeatures: GeoJSON.Feature[] = [];
 
-    // 저장된 독립 구역들
+    // 저장된 독립 구역들만 표시
     standaloneZones.forEach((zone) => {
       zoneFeatures.push({
         type: 'Feature',
@@ -544,8 +553,8 @@ export default function Globe({ onMapReady }: GlobeProps) {
       });
     });
 
-    // 생성 중인 독립 구역들
-    if (creationStep === 'zone-place') {
+    // 생성 중인 독립 구역들 (zone-place 단계에서만 미리보기)
+    if (creationStep === 'zone-place' && creationConfig.type === 'zone') {
       creationConfig.zones.forEach((zone) => {
         zoneFeatures.push({
           type: 'Feature',
@@ -556,9 +565,9 @@ export default function Globe({ onMapReady }: GlobeProps) {
     }
 
     source.setData({ type: 'FeatureCollection', features: zoneFeatures });
-  }, [standaloneZones, creationStep, creationConfig.zones]);
+  }, [standaloneZones, creationStep, creationConfig.type, creationConfig.zones]);
 
-  // 구역-사용자 연결 점선 업데이트
+  // 구역-사용자 연결 점선 업데이트 - 저장된 것만 표시, 생성 중인 것은 zone-place에서만
   useEffect(() => {
     if (!map.current?.isStyleLoaded() || !userLocation) return;
 
@@ -568,7 +577,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
     const connectionFeatures: GeoJSON.Feature[] = [];
     const userCoord: [number, number] = [userLocation.lon, userLocation.lat];
 
-    // 저장된 독립 구역들의 연결선
+    // 저장된 독립 구역들의 연결선만 표시
     standaloneZones.forEach((zone) => {
       connectionFeatures.push({
         type: 'Feature',
@@ -580,8 +589,8 @@ export default function Globe({ onMapReady }: GlobeProps) {
       });
     });
 
-    // 생성 중인 독립 구역들의 연결선
-    if (creationStep === 'zone-place') {
+    // 생성 중인 독립 구역들의 연결선 (zone-place 단계에서만 미리보기)
+    if (creationStep === 'zone-place' && creationConfig.type === 'zone') {
       creationConfig.zones.forEach((zone) => {
         connectionFeatures.push({
           type: 'Feature',
@@ -595,7 +604,7 @@ export default function Globe({ onMapReady }: GlobeProps) {
     }
 
     source.setData({ type: 'FeatureCollection', features: connectionFeatures });
-  }, [standaloneZones, creationStep, creationConfig.zones, userLocation]);
+  }, [standaloneZones, creationStep, creationConfig.type, creationConfig.zones, userLocation]);
 
   // 인터랙션 핸들러
   useEffect(() => {
@@ -895,13 +904,16 @@ export default function Globe({ onMapReady }: GlobeProps) {
           }
         }
         
+        // scope에 따른 초기 반경 설정
+        const initialRadius = creationConfig.scope === 'nearby' ? 0.01 : 1; // 근처: 10m, 그 외: 1km
+        
         // 새 구역 생성
         const newZone: Zone = {
           id: `zone-${Date.now()}`,
           creatorId: 'user-1',
           createdAt: new Date().toISOString(),
           center: [e.lngLat.lng, e.lngLat.lat],
-          radius: 1, // 초기 반경 1km
+          radius: initialRadius,
           color: getRandomLineColor(),
         };
         addCreationZone(newZone);

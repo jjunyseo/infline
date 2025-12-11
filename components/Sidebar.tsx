@@ -8,7 +8,9 @@ import LineListPanel from './LineListPanel';
 
 export default function Sidebar() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('create');
-  const { lines } = useLines();
+  const { lines, zones } = useLines();
+
+  const totalCount = lines.length + zones.length;
 
   return (
     <div className="absolute top-0 left-0 h-full z-20">
@@ -33,7 +35,7 @@ export default function Sidebar() {
                 : 'text-gray-400 hover:text-white'
               }`}
           >
-            선 만들기
+            만들기
           </button>
           <button
             onClick={() => setActiveTab('lines')}
@@ -43,10 +45,10 @@ export default function Sidebar() {
                 : 'text-gray-400 hover:text-white'
               }`}
           >
-            내 선
-            {lines.length > 0 && (
+            내 기록
+            {totalCount > 0 && (
               <span className="absolute top-2 right-4 w-5 h-5 bg-[#4264fb] rounded-full text-xs text-white flex items-center justify-center">
-                {lines.length}
+                {totalCount}
               </span>
             )}
           </button>
